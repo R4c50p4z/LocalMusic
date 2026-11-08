@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#121212">
+  <meta name="description" content="Reproductor para la música descargada en tu móvil">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="LocalMusic">
+  <title>LocalMusic</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div id="app">
+    <main id="view" tabindex="-1"></main>
+
+    <!-- Mini reproductor -->
+    <div id="mini" class="mini hidden" role="region" aria-label="Reproduciendo">
+      <button class="mini-open" id="mini-open" aria-label="Abrir reproductor">
+        <img id="mini-cover" class="cover" alt="">
+        <span class="mini-text">
+          <span id="mini-title" class="mini-title"></span>
+          <span id="mini-artist" class="mini-artist"></span>
+        </span>
+      </button>
+      <button class="icon-btn" id="mini-like" aria-label="Me gusta"></button>
+      <button class="icon-btn" id="mini-play" aria-label="Reproducir"></button>
+      <div class="mini-progress"><div id="mini-bar"></div></div>
+    </div>
+
+    <!-- Navegación inferior -->
+    <nav id="tabs" class="tabs">
+      <a href="#/" data-tab="home"><span data-icon="home"></span>Inicio</a>
+      <a href="#/search" data-tab="search"><span data-icon="search"></span>Buscar</a>
+      <a href="#/library" data-tab="library"><span data-icon="library"></span>Tu biblioteca</a>
+    </nav>
+  </div>
+
+  <!-- Reproductor a pantalla completa -->
+  <section id="player" class="player" aria-hidden="true" aria-label="Reproductor">
+    <header class="player-head">
+      <button class="icon-btn" id="player-close" aria-label="Cerrar reproductor"></button>
+      <div class="player-context">
+        <small>REPRODUCIENDO DESDE</small>
+        <span id="player-from">Tu biblioteca</span>
+      </div>
+      <button class="icon-btn" id="player-more" aria-label="Más opciones"></button>
+    </header>
+    <div class="player-art"><img id="player-cover" class="cover" alt=""></div>
+    <div class="player-meta">
+      <div class="player-titles">
+        <h2 id="player-title"></h2>
+        <button id="player-artist" class="link"></button>
+      </div>
+      <button class="icon-btn" id="player-like" aria-label="Me gusta"></button>
+    </div>
+    <div class="seek">
+      <input type="range" id="seek" min="0" max="1000" value="0" step="1" aria-label="Posición">
+      <div class="times"><span id="t-cur">0:00</span><span id="t-dur">0:00</span></div>
+    </div>
+    <div class="controls">
+      <button class="icon-btn" id="btn-shuffle" aria-label="Aleatorio"></button>
+      <button class="icon-btn big" id="btn-prev" aria-label="Anterior"></button>
+      <button class="play-btn" id="btn-play" aria-label="Reproducir"></button>
+      <button class="icon-btn big" id="btn-next" aria-label="Siguiente"></button>
+      <button class="icon-btn" id="btn-repeat" aria-label="Repetir"></button>
+    </div>
+    <div class="player-foot">
+      <button class="icon-btn" id="btn-queue" aria-label="Cola de reproducción"></button>
+    </div>
+  </section>
+
+  <!-- Hoja de acciones / diálogos -->
+  <div id="sheet-backdrop" class="backdrop hidden"></div>
+  <div id="sheet" class="sheet hidden" role="dialog" aria-modal="true"></div>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <input type="file" id="file-input" accept="audio/*,.mp3,.m4a,.aac,.flac,.ogg,.opus,.wav" multiple hidden>
+  <input type="file" id="folder-input" webkitdirectory multiple hidden>
+
+  <audio id="audio" preload="auto"></audio>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
