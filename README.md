@@ -30,8 +30,9 @@ La app necesita servirse por HTTPS para poder instalarse y funcionar sin conexi�
 La forma más fácil es GitHub Pages (gratis):
 
 1. En GitHub, ve a **Settings → Pages** y en *Source* elige **GitHub Actions**.
-2. Fusiona esta rama en `main`. El flujo `.github/workflows/pages.yml` publicará la app en
-   `https://<tu-usuario>.github.io/LocalMusic/`.
+2. Cada vez que se suben cambios a la rama principal del repositorio, el flujo
+   `.github/workflows/pages.yml` publica la app en `https://<tu-usuario>.github.io/LocalMusic/`
+   (también puedes lanzarlo a mano desde **Actions → Publicar en GitHub Pages → Run workflow**).
 3. Abre esa dirección en el móvil e instálala:
    - **Android (Chrome):** menú ⋮ → *Instalar aplicación* / *Añadir a pantalla de inicio*.
    - **iPhone (Safari):** botón Compartir → *Añadir a pantalla de inicio*.
