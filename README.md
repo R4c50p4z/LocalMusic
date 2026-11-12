@@ -20,6 +20,12 @@ pantalla de inicio y guarda tu música dentro de la propia app.
 - **Controles en la pantalla de bloqueo** y auriculares (Media Session).
 - Recuerda la cola y la posición cuando vuelves a abrir la app.
 - Editar título/artista/álbum y eliminar canciones de la biblioteca.
+- **Tus estadísticas** (guardadas sólo en el móvil): tiempo escuchado, media diaria, mejor día,
+  reproducciones, rachas de días seguidos, gráfica por día/mes, a qué horas escuchas, tops de
+  canciones, artistas y álbumes, e historial reciente. Filtra por 7 días, 30 días, este año o
+  siempre. Sólo cuenta el tiempo que la música suena de verdad (los saltos no suman).
+- **Copia de seguridad**: guarda en un archivo tus estadísticas, me gusta y playlists para
+  recuperarlos si cambias de móvil o reinstalas la app.
 
 > Las canciones se **copian** dentro del almacenamiento de la app (IndexedDB). Los archivos
 > originales del móvil nunca se modifican ni se borran.

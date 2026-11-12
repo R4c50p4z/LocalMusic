@@ -2,6 +2,7 @@
 import * as lib from './library.js';
 import * as player from './player.js';
 import { icon } from './icons.js';
+import * as stats from './stats.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const view = $('#view');
@@ -22,6 +23,13 @@ function fmtTotal(list) {
   if (t < 60) return `${Math.round(t)} s`;
   const h = Math.floor(t / 3600), m = Math.round((t % 3600) / 60);
   return h ? `${h} h ${m} min` : `${m} min`;
+}
+function fmtListen(sec) {
+  sec = Math.round(sec || 0);
+  if (sec < 60) return `${sec} s`;
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  if (!h) return `${m} min`;
+  return m ? `${h} h ${m} min` : `${h} h`;
 }
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 function fmtBytes(b) {
@@ -142,6 +150,7 @@ const routes = [
   [/^\/playlist\/(.+)$/, viewPlaylist, 'library'],
   [/^\/genre\/(.+)$/, viewGenre, 'search'],
   [/^\/settings$/, viewSettings, 'home'],
+  [/^\/stats$/, viewStats, 'home'],
 ];
 
 let lastHash = null;
@@ -194,6 +203,7 @@ function viewHome() {
   const hasSongs = lib.songs.size > 0;
   let html = `<header class="page-head">
     <h1>${greeting()}</h1>
+    <a class="icon-btn" href="#/stats" aria-label="Tus estadísticas">${icon('stats')}</a>
     <button class="icon-btn" data-act="import-files" aria-label="Añadir canciones">${icon('plus')}</button>
     <a class="icon-btn" href="#/settings" aria-label="Ajustes">${icon('settings')}</a>
   </header>`;
@@ -216,6 +226,11 @@ function viewHome() {
   if (quick.length % 2) quick.push(`<a href="#/songs">${gradientCover('cover', '#1e3264', '#477d95', 'note')}<span>Todas las canciones</span></a>`);
   html += `<div class="chips"><a class="chip active" href="#/">Todo</a><a class="chip" href="#/songs">Canciones</a><a class="chip" href="#/library?f=albums">Álbumes</a><a class="chip" href="#/library?f=artists">Artistas</a></div>`;
   html += `<div class="quick">${quick.join('')}</div>`;
+  const tot = stats.totals();
+  html += `<a class="stat-banner" href="#/stats">${icon('clock')}<div class="txt">
+      <div class="t">${tot.week >= 60 ? `Esta semana: ${fmtListen(tot.week)} de música` : 'Tus estadísticas de escucha'}</div>
+      <div class="s">${tot.today >= 60 ? `Hoy llevas ${fmtListen(tot.today)}` : tot.count ? 'Horas, tops, rachas y más' : 'Empieza a escuchar y aquí verás tus horas, tops y rachas'}</div>
+    </div>${icon('chevron')}</a>`;
 
   const most = lib.mostPlayed(10);
   if (most.length) {
@@ -444,6 +459,10 @@ async function viewSettings() {
       <button class="item" data-act="import-files">${gradientCover('cover', '#2a2a2a', '#2a2a2a', 'file')}<div class="txt"><div class="t">Añadir canciones</div><div class="s">Elige archivos de audio del móvil</div></div></button>
       <button class="item" data-act="import-folder">${gradientCover('cover', '#2a2a2a', '#2a2a2a', 'folder')}<div class="txt"><div class="t">Añadir una carpeta</div><div class="s">Importa todas las canciones de una carpeta</div></div></button>
       <button class="item" data-act="install">${gradientCover('cover', '#2a2a2a', '#2a2a2a', 'download')}<div class="txt"><div class="t">Instalar la app</div><div class="s">Añádela a tu pantalla de inicio</div></div></button>
+      <a class="item" href="#/stats">${gradientCover('cover', '#2a2a2a', '#2a2a2a', 'stats')}<div class="txt"><div class="t">Tus estadísticas</div><div class="s">Horas de escucha, tops y rachas</div></div></a>
+      <button class="item" data-act="export">${gradientCover('cover', '#2a2a2a', '#2a2a2a', 'save')}<div class="txt"><div class="t">Guardar copia de seguridad</div><div class="s">Estadísticas, me gusta y playlists en un archivo</div></div></button>
+      <button class="item" data-act="import-backup">${gradientCover('cover', '#2a2a2a', '#2a2a2a', 'upload')}<div class="txt"><div class="t">Restaurar copia de seguridad</div><div class="s">Recupera tus datos en este u otro móvil</div></div></button>
+      <button class="item" data-act="clear-stats">${gradientCover('cover', '#2a2a2a', '#2a2a2a', 'trash')}<div class="txt"><div class="t" style="color:var(--danger)">Borrar estadísticas</div><div class="s">Elimina el historial de escucha</div></div></button>
       <button class="item" data-act="wipe">${gradientCover('cover', '#2a2a2a', '#2a2a2a', 'trash')}<div class="txt"><div class="t" style="color:var(--danger)">Borrar toda la biblioteca</div><div class="s">Elimina canciones, playlists y me gusta de esta app</div></div></button>
     </div>
     <div class="storage">
@@ -452,6 +471,153 @@ async function viewSettings() {
       <p>Las canciones se guardan dentro de la app; los archivos originales del móvil no se tocan.</p>
     </div>`;
 }
+
+/* ---------------------------- Estadísticas ---------------------------- */
+
+let statsPeriod = '7d';
+const PERIODS = [['7d', '7 días'], ['30d', '30 días'], ['year', 'Este año'], ['all', 'Siempre']];
+const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+const WEEKDAYS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+
+function bucketLabel(b, short) {
+  const d = new Date(b.t);
+  if (b.kind === 'month') return short ? MONTHS[d.getMonth()] : `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  return short ? (statsPeriod === '7d' ? WEEKDAYS[d.getDay()] : String(d.getDate()))
+    : d.toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
+function dayName(t) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diff = Math.round((today - new Date(new Date(t).setHours(0, 0, 0, 0))) / 86400000);
+  if (diff === 0) return 'Hoy';
+  if (diff === 1) return 'Ayer';
+  const txt = new Date(t).toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' });
+  return txt.charAt(0).toUpperCase() + txt.slice(1);
+}
+
+function partOfDay(hours) {
+  const max = Math.max(...hours);
+  if (!max) return '';
+  const h = hours.indexOf(max);
+  const when = h < 6 ? 'de madrugada' : h < 12 ? 'por la mañana' : h < 20 ? 'por la tarde' : 'por la noche';
+  return `Escuchas sobre todo ${when} (hacia las ${h}:00)`;
+}
+
+function chart(buckets, cls, labelEvery) {
+  const max = Math.max(...buckets.map(b => b.seconds), 1);
+  return `<div class="chart ${cls}">${buckets.map((b, i) => `<button class="${b.seconds ? '' : 'zero'}" data-bar="${i}" aria-label="${esc(b.label)}: ${fmtListen(b.seconds)}"><i style="height:${Math.max(1.5, (b.seconds / max) * 100).toFixed(1)}%"></i></button>`).join('')}</div>
+    <div class="chart-x">${buckets.map((b, i) => `<span>${i % labelEvery === 0 ? esc(b.short) : ''}</span>`).join('')}</div>`;
+}
+
+function viewStats() {
+  const st = stats.compute(statsPeriod);
+  const chips = PERIODS.map(([k, l]) => `<button class="chip${k === statsPeriod ? ' active' : ''}" data-act="stats-period" data-p="${k}">${l}</button>`).join('');
+  let html = `<header class="page-head"><a class="icon-btn" href="#/" aria-label="Volver">${icon('back')}</a><h1>Tus estadísticas</h1></header>
+    <div class="chips">${chips}</div>`;
+
+  if (st.empty) {
+    html += `<div class="empty"><h2>${statsPeriod === 'all' ? 'Aún no hay escuchas' : 'Sin escuchas en este periodo'}</h2>
+      <p>Cada canción que escuches se apunta aquí: tiempo escuchado, tus canciones y artistas favoritos, a qué horas escuchas y tus rachas. Todo se guarda sólo en tu móvil.</p>
+      ${lib.songs.size ? '' : '<button class="btn accent" data-act="import-files">Añadir canciones</button>'}</div>`;
+    view.innerHTML = html;
+    return;
+  }
+
+  const h = Math.floor(st.total / 3600), m = Math.floor((st.total % 3600) / 60);
+  html += `<section class="stat-hero">
+      <small>Tiempo escuchado</small>
+      <div class="big">${h ? `${h}<span>h</span>` : ''}${m}<span>min</span></div>
+      <div class="sub">Media de ${fmtListen(st.avgPerDay)} al día · ${plural(st.activeDays, 'día', 'días')} con música${st.bestDay ? ` · Tu mejor día: ${esc(dayName(new Date(st.bestDay.key + 'T12:00:00').getTime()).toLowerCase())} (${fmtListen(st.bestDay.seconds)})` : ''}</div>
+    </section>
+    <div class="tiles">
+      <div class="tile"><div class="v">${st.plays}</div><div class="l">Reproducciones</div></div>
+      <div class="tile"><div class="v">${st.songs}</div><div class="l">Canciones distintas</div></div>
+      <div class="tile"><div class="v">${st.artists}</div><div class="l">Artistas</div></div>
+      <div class="tile"><div class="v">${icon('fire')}${st.streak}</div><div class="l">${st.streak === 1 ? 'Día seguido' : 'Días seguidos'} · récord ${st.bestStreak}</div></div>
+    </div>`;
+
+  const buckets = st.buckets.map(b => ({ ...b, label: bucketLabel(b, false), short: bucketLabel(b, true) }));
+  const every = buckets.length > 14 ? Math.ceil(buckets.length / 8) : 1;
+  html += `<section class="panel"><h2>${buckets[0]?.kind === 'month' ? 'Tiempo por mes' : 'Tiempo por día'}</h2>
+    <div class="cap" id="cap-main">Toca una barra para ver el detalle</div>${chart(buckets, 'main', every)}</section>`;
+
+  const hours = st.hours.map((s, i) => ({ seconds: s, label: `${i}:00–${i}:59`, short: String(i) }));
+  html += `<section class="panel"><h2>¿Cuándo escuchas?</h2>
+    <div class="cap" id="cap-hours">${partOfDay(st.hours)}</div>${chart(hours, 'hours', 6)}</section>`;
+
+  const statRow = (i, cover, title, sub, meta, attrs = '') => `<div class="item"${attrs}><span class="rank">${i + 1}</span>${cover}<div class="txt"><div class="t">${esc(title)}</div><div class="s">${esc(sub)}</div></div><div class="meta">${meta}</div></div>`;
+  html += `<h2 class="section-title">Canciones más escuchadas</h2><div class="list">${st.topSongs.slice(0, 10).map((s, i) =>
+    statRow(i, coverImg(lib.coverUrl(s.coverId)), s.title, s.artist, `${fmtListen(s.seconds)}<br>${plural(s.plays, 'vez', 'veces')}`, s.songId ? ` data-stat-song="${s.songId}" role="button" tabindex="0"` : '')).join('')}</div>`;
+  html += `<h2 class="section-title">Artistas más escuchados</h2><div class="list">${st.topArtists.slice(0, 10).map((a, i) =>
+    `<a class="item round" href="#/artist/${enc(a.key)}"><span class="rank">${i + 1}</span>${coverImg(lib.coverUrl(a.coverId), 'cover', a.name)}<div class="txt"><div class="t">${esc(a.name)}</div><div class="s">${plural(a.plays, 'reproducción', 'reproducciones')}</div></div><div class="meta">${fmtListen(a.seconds)}</div></a>`).join('')}</div>`;
+  html += `<h2 class="section-title">Álbumes más escuchados</h2><div class="row">${st.topAlbums.slice(0, 10).map(a =>
+    `<a class="card" href="#/album/${enc(a.key)}">${coverImg(lib.coverUrl(a.coverId), 'cover', a.name)}<div class="t">${esc(a.name)}</div><div class="s">${esc(a.artist)} · ${fmtListen(a.seconds)}</div></a>`).join('')}</div>`;
+
+  // Historial reciente agrupado por día
+  let lastDay = '';
+  const rec = stats.recent(40).map(r => {
+    const d = stats.dayKey(r.start);
+    const head = d !== lastDay ? `<div class="hist-day">${esc(dayName(r.start))}</div>` : '';
+    lastDay = d;
+    const time = new Date(r.start).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+    const id = lib.songs.has(r.songId) ? r.songId : null;
+    return `${head}<div class="item"${id ? ` data-stat-song="${id}" role="button" tabindex="0"` : ''}>${coverImg(lib.coverUrl(r.coverId))}<div class="txt"><div class="t">${esc(r.title)}</div><div class="s">${esc(r.artist)}</div></div><div class="meta">${time}<br>${fmtListen(r.seconds)}</div></div>`;
+  }).join('');
+  html += `<h2 class="section-title">Escuchado recientemente</h2><div class="list">${rec}</div>
+    <div class="btn-row" style="margin-top:24px">
+      <button class="btn small ghost" data-act="export">${icon('save')} Guardar copia</button>
+      <button class="btn small ghost" data-act="import-backup">${icon('upload')} Restaurar copia</button>
+    </div>
+    <p class="hint" style="text-align:center">Tus estadísticas se guardan sólo en este móvil. Guarda una copia si vas a cambiar de móvil o borrar la app.</p>`;
+  view.innerHTML = html;
+
+  // Detalle al tocar una barra
+  view.querySelectorAll('.chart').forEach(ch => {
+    const isHours = ch.classList.contains('hours');
+    const data = isHours ? hours : buckets;
+    const cap = $(isHours ? '#cap-hours' : '#cap-main');
+    ch.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-bar]');
+      if (!b) return;
+      ch.querySelectorAll('.sel').forEach(x => x.classList.remove('sel'));
+      b.classList.add('sel');
+      const d = data[+b.dataset.bar];
+      cap.textContent = `${d.label.charAt(0).toUpperCase() + d.label.slice(1)}: ${d.seconds ? fmtListen(d.seconds) : 'sin música'}`;
+    });
+  });
+}
+
+async function exportBackup() {
+  const blob = await stats.exportData();
+  const name = `localmusic-copia-${stats.dayKey(Date.now())}.json`;
+  const file = new File([blob], name, { type: 'application/json' });
+  // En el móvil, compartir permite guardarla en Drive, Archivos, enviarla por WhatsApp...
+  if (navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: 'Copia de LocalMusic' }); return; }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  toast('Copia guardada en Descargas');
+}
+
+$('#backup-input').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  try {
+    const r = await stats.importData(f);
+    toast(`Restaurado: ${plural(r.added, 'escucha', 'escuchas')}, ${plural(r.likes, 'me gusta', 'me gusta')}, ${plural(r.lists, 'playlist', 'playlists')}`, 4000);
+    rerender();
+  } catch (err) {
+    toast(err.message || 'No se pudo leer la copia', 4000);
+  }
+});
 
 function notFound() {
   view.innerHTML = `<div class="empty"><h2>No encontrado</h2><p>Puede que lo hayas borrado de tu biblioteca.</p><a class="btn" href="#/">Ir al inicio</a></div>`;
@@ -743,6 +909,14 @@ document.addEventListener('click', async (e) => {
         <b>Android (Chrome):</b> menú ⋮ → «Añadir a pantalla de inicio» o «Instalar aplicación».<br><br>
         <b>iPhone (Safari):</b> botón Compartir → «Añadir a pantalla de inicio».</p>${opt('ok', 'close', 'Entendido')}`);
     }
+    if (a === 'stats-period') { statsPeriod = act.dataset.p; return rerender(); }
+    if (a === 'export') return exportBackup();
+    if (a === 'import-backup') return $('#backup-input').click();
+    if (a === 'clear-stats') {
+      return openSheet(`<h3>¿Borrar las estadísticas?</h3><p style="color:var(--muted);font-size:14px">Se eliminará todo tu historial de escucha. Tus canciones, playlists y me gusta no se tocan.</p>${opt('yes', 'trash', 'Borrar estadísticas', 'danger')}${opt('no', 'close', 'Cancelar')}`, {
+        yes: async () => { await stats.clearHistory(); toast('Estadísticas borradas'); rerender(); },
+      });
+    }
     if (a === 'wipe') {
       return openSheet(`<h3>¿Borrar toda la biblioteca?</h3><p style="color:var(--muted);font-size:14px">Se eliminarán todas las canciones, playlists y me gusta de la app. Los archivos de tu móvil no se tocan.</p>${opt('yes', 'trash', 'Borrar todo', 'danger')}${opt('no', 'close', 'Cancelar')}`, {
         yes: async () => { player.pause(); await lib.wipe(); player.purge(); toast('Biblioteca borrada'); go('#/'); },
@@ -755,6 +929,12 @@ document.addEventListener('click', async (e) => {
     const listEl = more.closest('[data-list]');
     const info = listEl ? lists[listEl.dataset.list] : null;
     return songMenu(more.dataset.more, info ? { ctx: info.ctx, index: +more.dataset.i } : null);
+  }
+
+  const statSong = t.closest('[data-stat-song]');
+  if (statSong) {
+    const ids = [...view.querySelectorAll('[data-stat-song]')].map(el => el.dataset.statSong).filter((v, i, a) => a.indexOf(v) === i);
+    return player.playList(ids, ids.indexOf(statSong.dataset.statSong), { type: 'stats', id: '', label: 'Tus estadísticas', href: '#/stats' });
   }
 
   const one = t.closest('[data-play-one]');
@@ -969,6 +1149,7 @@ async function importShared() {
 (async function start() {
   try {
     await lib.load();
+    await stats.load();
   } catch (err) {
     console.error(err);
     view.innerHTML = `<div class="empty"><h2>No se pudo abrir la biblioteca</h2><p>Tu navegador no permite guardar datos (¿modo incógnito?). ${esc(err.message || '')}</p></div>`;

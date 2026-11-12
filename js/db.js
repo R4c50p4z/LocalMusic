@@ -4,9 +4,10 @@
 // - covers:    carátulas (Blob), compartidas entre canciones del mismo álbum
 // - playlists: listas creadas por el usuario
 // - kv:        ajustes y estado (me gusta, cola, etc.)
+// - history:   cada escucha (qué canción, cuándo y cuántos segundos), para las estadísticas
 
 const DB_NAME = 'localmusic';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 let dbPromise;
 
 function open() {
@@ -20,8 +21,16 @@ function open() {
       if (!db.objectStoreNames.contains('covers')) db.createObjectStore('covers');
       if (!db.objectStoreNames.contains('playlists')) db.createObjectStore('playlists', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+      if (!db.objectStoreNames.contains('history')) {
+        db.createObjectStore('history', { keyPath: 'id', autoIncrement: true }).createIndex('start', 'start');
+      }
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onblocked = () => console.warn('Cierra otras pestañas de LocalMusic para actualizar la base de datos');
+    req.onsuccess = () => {
+      const db = req.result;
+      db.onversionchange = () => { db.close(); location.reload(); }; // otra pestaña trae una versión nueva
+      resolve(db);
+    };
     req.onerror = () => reject(req.error);
   });
   return dbPromise;
@@ -56,6 +65,22 @@ export async function put(store, value, key) {
   const db = await open();
   const tx = db.transaction(store, 'readwrite');
   tx.objectStore(store).put(value, key);
+  return done(tx);
+}
+
+/** Inserta o actualiza y devuelve la clave (útil con autoIncrement). */
+export async function putGetKey(store, value) {
+  const db = await open();
+  const tx = db.transaction(store, 'readwrite');
+  const key = await reqP(tx.objectStore(store).put(value));
+  await done(tx);
+  return key;
+}
+
+export async function clear(store) {
+  const db = await open();
+  const tx = db.transaction(store, 'readwrite');
+  tx.objectStore(store).clear();
   return done(tx);
 }
 
