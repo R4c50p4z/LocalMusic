@@ -78,6 +78,7 @@ audio.addEventListener('play', () => { lastT = audio.currentTime; });
 audio.addEventListener('pause', () => { flush(); lastT = null; });
 audio.addEventListener('ended', endSession);
 player.bus.addEventListener('track', endSession);
+player.bus.addEventListener('loop', endSession); // con «repetir una», cada vuelta es una escucha
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
 window.addEventListener('pagehide', flush);
 
