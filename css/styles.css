@@ -272,3 +272,40 @@ input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border: 0; bord
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* ---------- Estadísticas ---------- */
+.stat-banner {
+  display: flex; align-items: center; gap: 12px; margin-top: 16px; padding: 14px 16px;
+  border-radius: 10px; background: linear-gradient(120deg, #1d4d36, #1e3264);
+}
+.stat-banner .txt { flex: 1; min-width: 0; }
+.stat-banner .t { font-weight: 700; }
+.stat-banner .s { font-size: 13px; color: rgba(255,255,255,.75); }
+.stat-hero {
+  border-radius: 12px; padding: 20px 18px; margin-bottom: 12px;
+  background: linear-gradient(135deg, #1ed76033, #1e326499), var(--bg-2);
+}
+.stat-hero small { color: var(--muted); font-size: 13px; }
+.stat-hero .big { font-size: 44px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; margin: 4px 0; font-variant-numeric: tabular-nums; }
+.stat-hero .big span { font-size: 22px; font-weight: 700; color: var(--muted); margin: 0 6px 0 2px; }
+.stat-hero .sub { color: var(--muted); font-size: 13px; }
+.tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+@media (min-width: 720px) { .tiles { grid-template-columns: repeat(4, 1fr); } }
+.tile { background: var(--bg-2); border-radius: 10px; padding: 14px; }
+.tile .v { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 6px; }
+.tile .v svg.i { color: #ff8a3d; width: 22px; height: 22px; }
+.tile .l { font-size: 12px; color: var(--muted); }
+.panel { background: var(--bg-2); border-radius: 10px; padding: 16px; margin-top: 12px; }
+.panel h2 { font-size: 16px; }
+.panel .cap { font-size: 13px; color: var(--muted); margin: 2px 0 12px; min-height: 18px; }
+.chart { display: flex; align-items: flex-end; gap: 3px; height: 140px; }
+.chart button { flex: 1; height: 100%; display: flex; align-items: flex-end; min-width: 0; }
+.chart button i { display: block; width: 100%; border-radius: 3px 3px 0 0; background: #3e7c5a; min-height: 2px; transition: background .15s; }
+.chart button.zero i { background: #333; }
+.chart button.sel i, .chart button:hover i { background: var(--accent); }
+.chart-x { display: flex; gap: 3px; margin-top: 6px; }
+.chart-x span { flex: 1; text-align: center; font-size: 10px; color: var(--dim); white-space: nowrap; overflow: visible; min-width: 0; }
+.chart.hours { height: 90px; gap: 2px; }
+.rank { width: 22px; text-align: center; color: var(--muted); font-weight: 700; flex: none; font-variant-numeric: tabular-nums; }
+.item .meta { font-size: 12px; color: var(--muted); text-align: right; flex: none; font-variant-numeric: tabular-nums; }
+.hist-day { font-size: 13px; font-weight: 700; color: var(--muted); margin: 14px 0 2px; }

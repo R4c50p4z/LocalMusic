@@ -20,6 +20,12 @@ pantalla de inicio y guarda tu música dentro de la propia app.
 - **Controles en la pantalla de bloqueo** y auriculares (Media Session).
 - Recuerda la cola y la posición cuando vuelves a abrir la app.
 - Editar título/artista/álbum y eliminar canciones de la biblioteca.
+- **Tus estadísticas** (guardadas sólo en el móvil): tiempo escuchado, media diaria, mejor día,
+  reproducciones, rachas de días seguidos, gráfica por día/mes, a qué horas escuchas, tops de
+  canciones, artistas y álbumes, e historial reciente. Filtra por 7 días, 30 días, este año o
+  siempre. Sólo cuenta el tiempo que la música suena de verdad (los saltos no suman).
+- **Copia de seguridad**: guarda en un archivo tus estadísticas, me gusta y playlists para
+  recuperarlos si cambias de móvil o reinstalas la app.
 
 > Las canciones se **copian** dentro del almacenamiento de la app (IndexedDB). Los archivos
 > originales del móvil nunca se modifican ni se borran.
@@ -30,8 +36,9 @@ La app necesita servirse por HTTPS para poder instalarse y funcionar sin conexi�
 La forma más fácil es GitHub Pages (gratis):
 
 1. En GitHub, ve a **Settings → Pages** y en *Source* elige **GitHub Actions**.
-2. Fusiona esta rama en `main`. El flujo `.github/workflows/pages.yml` publicará la app en
-   `https://<tu-usuario>.github.io/LocalMusic/`.
+2. Cada vez que se suben cambios a la rama principal del repositorio, el flujo
+   `.github/workflows/pages.yml` publica la app en `https://<tu-usuario>.github.io/LocalMusic/`
+   (también puedes lanzarlo a mano desde **Actions → Publicar en GitHub Pages → Run workflow**).
 3. Abre esa dirección en el móvil e instálala:
    - **Android (Chrome):** menú ⋮ → *Instalar aplicación* / *Añadir a pantalla de inicio*.
    - **iPhone (Safari):** botón Compartir → *Añadir a pantalla de inicio*.

@@ -1,9 +1,9 @@
 // Service worker: la app funciona sin conexión y recibe audio "compartido" desde otras apps.
-const VERSION = 'v1';
+const VERSION = 'v3';
 const CACHE = `localmusic-${VERSION}`;
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/styles.css',
-  'js/app.js', 'js/library.js', 'js/player.js', 'js/db.js', 'js/metadata.js', 'js/icons.js',
+  'js/app.js', 'js/library.js', 'js/player.js', 'js/db.js', 'js/metadata.js', 'js/icons.js', 'js/stats.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png',
 ];
 
