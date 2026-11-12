@@ -13,6 +13,8 @@ export const state = {
   shuffle: false,
   repeat: 'off',      // 'off' | 'all' | 'one'
   context: null,      // { type, id, label, href }
+  autoplay: true,     // al acabar la lista, seguir con otras canciones (como Spotify)
+  autoNextId: null,   // canción elegida para la reproducción automática
 };
 
 let currentUrl = null;
@@ -92,7 +94,25 @@ function upcomingId() {
   if (state.repeat === 'one' || !state.queue.length) return null;
   if (state.index < state.queue.length - 1) return state.queue[state.index + 1];
   if (state.repeat === 'all') return state.queue[0];
+  if (state.autoplay) return pickAutoNext();
   return null;
+}
+
+/** Reproducción automática: una canción al azar que no haya sonado en esta cola. */
+function pickAutoNext() {
+  if (state.autoNextId && lib.songs.has(state.autoNextId) && !state.queue.includes(state.autoNextId)) return state.autoNextId;
+  const used = new Set(state.queue);
+  let pool = [...lib.songs.keys()].filter(id => !used.has(id));
+  if (!pool.length) pool = [...lib.songs.keys()].filter(id => id !== state.queue[state.index]);
+  state.autoNextId = pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
+  return state.autoNextId;
+}
+
+export function setAutoplay(on) {
+  state.autoplay = !!on;
+  state.autoNextId = null;
+  preloadNext();
+  saveState();
 }
 
 let preloadToken = 0;
@@ -111,7 +131,7 @@ function applyLoop() { audio.loop = state.repeat === 'one'; }
 
 export function toggle() {
   if (!current()) return;
-  if (audio.paused) audio.play().catch(() => {}); else audio.pause();
+  if (audio.paused) audio.play().catch(() => {}); else pause();
 }
 export function play() {
   if (!current()) return;
@@ -119,7 +139,9 @@ export function play() {
   if (!audio.currentSrc || audio.error) load(true, audio.currentTime || 0);
   else audio.play().catch(() => {});
 }
-export function pause() { audio.pause(); }
+let userPaused = false;
+let endHandledFor = null; // canción cuyo final ya se gestionó
+export function pause() { userPaused = true; audio.pause(); }
 
 export async function next(auto = false) {
   if (!state.queue.length) return;
@@ -129,10 +151,18 @@ export async function next(auto = false) {
     return;
   }
   if (state.index < state.queue.length - 1) state.index++;
-  else if (state.repeat === 'all' || !auto) {
+  else if (state.repeat === 'all') {
     state.index = 0;
     // Nueva vuelta en aleatorio: se baraja de nuevo, empezando por la ya preparada
     if (auto && state.shuffle) state.queue = shuffled(state.original, state.queue[0]);
+  } else if (state.autoplay && pickAutoNext()) {
+    // Fin de la lista: seguir con otra canción de tu biblioteca
+    state.queue.push(state.autoNextId);
+    state.autoNextId = null;
+    state.index++;
+    if (state.context?.type !== 'auto') state.context = { type: 'auto', label: 'Reproducción automática' };
+  } else if (!auto) {
+    state.index = 0;
   } else {
     audio.pause();
     audio.currentTime = 0;
@@ -246,7 +276,7 @@ function saveState() {
   saveTimer = setTimeout(() => {
     db.put('kv', {
       queue: state.queue, original: state.original, index: state.index,
-      shuffle: state.shuffle, repeat: state.repeat, context: state.context,
+      shuffle: state.shuffle, repeat: state.repeat, context: state.context, autoplay: state.autoplay,
       position: audio.currentTime || 0,
     }, 'player').catch(() => {});
   }, 300);
@@ -260,6 +290,7 @@ export async function restore() {
   state.shuffle = !!s.shuffle;
   state.repeat = s.repeat || 'off';
   state.context = s.context || null;
+  state.autoplay = s.autoplay !== false;
   const cur = s.queue?.[s.index];
   state.index = state.queue.indexOf(cur);
   if (state.index < 0 && state.queue.length) state.index = 0;
@@ -323,10 +354,50 @@ audio.addEventListener('pause', () => { emit('state'); saveState(); if ('mediaSe
 // Al acabar, la siguiente arranca en el mismo instante (está precargada) y la
 // pantalla de bloqueo sigue mostrando «reproduciendo» durante el cambio.
 audio.addEventListener('ended', () => {
+  const id = current()?.id;
+  if (id && endHandledFor === id) return; // el vigilante ya pasó a la siguiente
+  endHandledFor = id;
   if ('mediaSession' in navigator && upcomingId()) navigator.mediaSession.playbackState = 'playing';
   next(true);
 });
 bus.addEventListener('queue', () => setTimeout(preloadNext, 0));
+
+// Safari en iPhone calcula mal la duración de muchos MP3 (bitrate variable): la
+// canción se para un poco antes del final que él cree y nunca avisa de que ha
+// terminado. Si el audio deja de avanzar cerca del final, se pasa a la siguiente.
+let watchPos = -1, watchStill = 0;
+function nearEnd() {
+  const song = current();
+  const d = Math.min(audio.duration || Infinity, song?.duration || Infinity);
+  return Number.isFinite(d) && d > 0 && audio.currentTime >= d - Math.max(3, d * 0.04);
+}
+function forceEnded(reason) {
+  const id = current()?.id;
+  if (!id || endHandledFor === id || audio.loop) return;
+  endHandledFor = id;
+  console.info('Fin de canción forzado:', reason);
+  if ('mediaSession' in navigator && upcomingId()) navigator.mediaSession.playbackState = 'playing';
+  next(true);
+}
+bus.addEventListener('track', () => { endHandledFor = null; watchPos = -1; watchStill = 0; });
+setInterval(() => {
+  if (audio.paused || audio.loop || !current()) { watchStill = 0; return; }
+  if (Math.abs(audio.currentTime - watchPos) < 0.05) watchStill++; else watchStill = 0;
+  watchPos = audio.currentTime;
+  if (watchStill >= 2 && nearEnd()) forceEnded('el audio dejó de avanzar');
+}, 1000);
+for (const ev of ['stalled', 'waiting', 'suspend']) {
+  audio.addEventListener(ev, () => {
+    if (audio.paused || audio.loop || !nearEnd()) return;
+    const at = audio.currentTime;
+    setTimeout(() => { if (!audio.paused && Math.abs(audio.currentTime - at) < 0.05 && nearEnd()) forceEnded(ev); }, 1500);
+  });
+}
+// Algunas versiones de iOS lanzan «pause» en vez de «ended» al acabar
+audio.addEventListener('pause', () => {
+  if (!audio.ended && !userPaused && nearEnd() && audio.currentTime >= (audio.duration || Infinity) - 0.6) forceEnded('pausa al final');
+  userPaused = false;
+});
 
 // Cada vuelta del bucle de «repetir una» cuenta como una reproducción nueva
 let lastPos = 0;

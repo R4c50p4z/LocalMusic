@@ -459,6 +459,7 @@ async function viewSettings() {
       <button class="item" data-act="import-files">${gradientCover('cover', '#2a2a2a', '#2a2a2a', 'file')}<div class="txt"><div class="t">Añadir canciones</div><div class="s">Elige archivos de audio del móvil</div></div></button>
       <button class="item" data-act="import-folder">${gradientCover('cover', '#2a2a2a', '#2a2a2a', 'folder')}<div class="txt"><div class="t">Añadir una carpeta</div><div class="s">Importa todas las canciones de una carpeta</div></div></button>
       <button class="item" data-act="install">${gradientCover('cover', '#2a2a2a', '#2a2a2a', 'download')}<div class="txt"><div class="t">Instalar la app</div><div class="s">Añádela a tu pantalla de inicio</div></div></button>
+      <button class="item" data-act="toggle-autoplay">${gradientCover('cover', '#2a2a2a', '#2a2a2a', 'playNext')}<div class="txt"><div class="t">Reproducción automática</div><div class="s">Al acabar la lista, seguir con otras canciones de tu biblioteca</div></div><span class="chip${player.state.autoplay ? ' active' : ''}">${player.state.autoplay ? 'Activada' : 'Desactivada'}</span></button>
       <a class="item" href="#/stats">${gradientCover('cover', '#2a2a2a', '#2a2a2a', 'stats')}<div class="txt"><div class="t">Tus estadísticas</div><div class="s">Horas de escucha, tops y rachas</div></div></a>
       <button class="item" data-act="export">${gradientCover('cover', '#2a2a2a', '#2a2a2a', 'save')}<div class="txt"><div class="t">Guardar copia de seguridad</div><div class="s">Estadísticas, me gusta y playlists en un archivo</div></div></button>
       <button class="item" data-act="import-backup">${gradientCover('cover', '#2a2a2a', '#2a2a2a', 'upload')}<div class="txt"><div class="t">Restaurar copia de seguridad</div><div class="s">Recupera tus datos en este u otro móvil</div></div></button>
@@ -910,6 +911,11 @@ document.addEventListener('click', async (e) => {
         <b>iPhone (Safari):</b> botón Compartir → «Añadir a pantalla de inicio».</p>${opt('ok', 'close', 'Entendido')}`);
     }
     if (a === 'stats-period') { statsPeriod = act.dataset.p; return rerender(); }
+    if (a === 'toggle-autoplay') {
+      player.setAutoplay(!player.state.autoplay);
+      toast(player.state.autoplay ? 'Al acabar la lista seguirá sonando música' : 'La música se parará al acabar la lista');
+      return rerender();
+    }
     if (a === 'export') return exportBackup();
     if (a === 'import-backup') return $('#backup-input').click();
     if (a === 'clear-stats') {
