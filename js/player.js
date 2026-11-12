@@ -145,11 +145,14 @@ export async function next(auto = false) {
 
 export async function prev() {
   if (!state.queue.length) return;
-  if (audio.currentTime > 3 || state.index === 0) {
+  // Si ya lleva unos segundos, «anterior» vuelve al principio (como en cualquier reproductor)
+  const atStart = state.index === 0 && state.repeat !== 'all';
+  if (audio.currentTime > 3 || atStart || state.queue.length === 1) {
     audio.currentTime = 0;
+    if (audio.paused) play();
     return;
   }
-  state.index--;
+  state.index = state.index === 0 ? state.queue.length - 1 : state.index - 1;
   emit('queue');
   await load(true);
 }
@@ -289,22 +292,33 @@ function updatePositionState() {
   } catch { /* ignorar */ }
 }
 
-if ('mediaSession' in navigator) {
+// Controles de la pantalla de bloqueo, auriculares y Centro de control.
+// Sólo canción anterior/siguiente: si se registran «avanzar/retroceder 10 s»,
+// el iPhone los muestra EN LUGAR de los de cambiar de canción.
+function registerMediaHandlers() {
+  if (!('mediaSession' in navigator)) return;
   const ms = navigator.mediaSession;
-  const h = (action, fn) => { try { ms.setActionHandler(action, fn); } catch { /* no soportado */ } };
-  h('play', play);
-  h('pause', pause);
-  h('stop', pause);
-  h('previoustrack', prev);
+  const h = (action, fn) => {
+    try {
+      ms.setActionHandler(action, fn && ((details) => {
+        try { fn(details); } catch (err) { console.warn('Acción', action, err); }
+      }));
+    } catch { /* acción no soportada en este navegador */ }
+  };
+  h('play', () => play());
+  h('pause', () => pause());
+  h('stop', () => pause());
+  h('previoustrack', () => prev());
   h('nexttrack', () => next());
   h('seekto', (e) => seek(e.seekTime));
-  h('seekbackward', (e) => seek(audio.currentTime - (e.seekOffset || 10)));
-  h('seekforward', (e) => seek(audio.currentTime + (e.seekOffset || 10)));
+  h('seekbackward', null);
+  h('seekforward', null);
 }
+registerMediaHandlers();
 
 /* ------------------------------ Eventos audio ------------------------------ */
 
-audio.addEventListener('play', () => { emit('state'); if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'; });
+audio.addEventListener('play', () => { registerMediaHandlers(); emit('state'); if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'; });
 audio.addEventListener('pause', () => { emit('state'); saveState(); if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused'; });
 // Al acabar, la siguiente arranca en el mismo instante (está precargada) y la
 // pantalla de bloqueo sigue mostrando «reproduciendo» durante el cambio.
