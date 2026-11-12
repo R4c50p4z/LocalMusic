@@ -18,12 +18,24 @@ export function log(msg) {
 export function getLog() { return [...entries].reverse(); }
 export function clearLog() { entries = []; try { localStorage.removeItem(KEY); } catch { /* nada */ } }
 
-export function environment() {
+// Desde iOS 26, Apple congela la versión que el iPhone comunica a las webs en «18.x»
+// para todos. Safari indica su propia versión (igual a la de iOS) en «Version/…»,
+// pero las apps instaladas en la pantalla de inicio a menudo no la incluyen.
+function systemName() {
   const ua = navigator.userAgent;
   const ios = ua.match(/OS (\d+)_(\d+)(?:_(\d+))? like Mac OS X/);
+  if (!ios) return ua.match(/Android [\d.]+/)?.[0] || navigator.platform || 'desconocido';
+  const reported = `${ios[1]}.${ios[2]}${ios[3] ? '.' + ios[3] : ''}`;
+  const safari = ua.match(/Version\/(\d+)(?:\.(\d+))?/);
+  if (safari && +safari[1] >= 26) return `iOS ${safari[1]}${safari[2] ? '.' + safari[2] : ''}`;
+  if (+ios[1] === 18 && +ios[2] >= 6) return 'iOS 18.6 o posterior (el iPhone no indica la versión exacta)';
+  return `iOS ${reported}`;
+}
+
+export function environment() {
   return {
     version: VERSION,
-    system: ios ? `iOS ${ios[1]}.${ios[2]}${ios[3] ? '.' + ios[3] : ''}` : (ua.match(/Android [\d.]+/)?.[0] || navigator.platform || 'desconocido'),
+    system: systemName(),
     installed: window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true,
     mediaSession: 'mediaSession' in navigator,
     serviceWorker: !!navigator.serviceWorker?.controller,
