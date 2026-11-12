@@ -80,7 +80,9 @@ async function load(autoplay, startAt = 0) {
   audio.src = url;
   applyLoop();
   if (startAt) {
-    audio.addEventListener('loadedmetadata', () => { audio.currentTime = startAt; }, { once: true });
+    // En iPhone el audio no se carga hasta darle a play: si mientras tanto eliges otra
+    // canción, esta posición guardada NO debe aplicarse a la nueva.
+    audio.addEventListener('loadedmetadata', () => { if (token === loadToken) audio.currentTime = startAt; }, { once: true });
   }
   log(`Cargando «${song.title}»${preloadedHit ? ' (precargada)' : ''}`);
   const playing = autoplay ? audio.play() : null;
@@ -392,11 +394,20 @@ setInterval(() => {
   watchPos = audio.currentTime;
   if (watchStill >= 2 && nearEnd()) forceEnded('el audio dejó de avanzar');
 }, 1000);
-for (const ev of ['stalled', 'waiting', 'suspend']) {
+// Con la pantalla bloqueada, iOS congela los temporizadores (el vigilante de arriba
+// no corre), así que se reacciona directamente a los avisos del propio audio:
+// el archivo está en el móvil, de modo que «esperando datos» al final es un atasco.
+for (const ev of ['stalled', 'waiting']) {
   audio.addEventListener(ev, () => {
-    if (audio.paused || audio.loop || !nearEnd()) return;
-    const at = audio.currentTime;
-    setTimeout(() => { if (!audio.paused && Math.abs(audio.currentTime - at) < 0.05 && nearEnd()) forceEnded(ev); }, 1500);
+    if (!audio.paused && !audio.loop && nearEnd()) forceEnded(ev);
+  });
+}
+const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+if (IS_IOS) {
+  // En iPhone, a veces llega al final y nunca avisa: se pasa a la siguiente en el último instante
+  audio.addEventListener('timeupdate', () => {
+    const d = audio.duration;
+    if (!audio.loop && Number.isFinite(d) && d > 1 && audio.currentTime >= d - 0.2) forceEnded('final de la canción (iOS)');
   });
 }
 // Algunas versiones de iOS lanzan «pause» en vez de «ended» al acabar
