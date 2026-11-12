@@ -337,7 +337,7 @@ function registerMediaHandlers() {
   const h = (action, fn) => {
     try {
       ms.setActionHandler(action, fn && ((details) => {
-        log(`Pantalla de bloqueo: botón «${action}»`);
+        log(`Pantalla de bloqueo: botón «${action}»${action === 'seekto' ? ` → ${mmss(details?.seekTime)}` : ''}`);
         try { fn(details); } catch (err) { log(`Error en «${action}»: ${err.message}`); }
       }));
     } catch { /* acción no soportada en este navegador */ }
@@ -355,7 +355,7 @@ registerMediaHandlers();
 
 /* ------------------------------ Eventos audio ------------------------------ */
 
-audio.addEventListener('play', () => { log('▶ Sonando'); registerMediaHandlers(); emit('state'); if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'; });
+audio.addEventListener('play', () => { log('▶ Pide sonar'); registerMediaHandlers(); emit('state'); if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'; });
 audio.addEventListener('pause', () => { log(`⏸ Pausa en ${Math.round(audio.currentTime)} s de ${Math.round(audio.duration || 0)} s`); emit('state'); saveState(); if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused'; });
 // Al acabar, la siguiente arranca en el mismo instante (está precargada) y la
 // pantalla de bloqueo sigue mostrando «reproduciendo» durante el cambio.
@@ -442,5 +442,50 @@ audio.addEventListener('timeupdate', () => {
   if (!countedPlay && song && t > Math.min(30, (audio.duration || 60) / 2)) {
     countedPlay = true;
     lib.notePlayed(song.id, null);
+  }
+});
+
+/* ------------------------------ Diagnóstico ------------------------------ */
+// Latido cada ~30 s mientras suena: si el iPhone congela la app, se verá el hueco.
+const mmss = (t) => `${Math.floor((t || 0) / 60)}:${String(Math.floor((t || 0) % 60)).padStart(2, '0')}`;
+let lastBeat = 0;
+audio.addEventListener('timeupdate', () => {
+  const now = Date.now();
+  if (now - lastBeat >= 30000) {
+    if (lastBeat && now - lastBeat > 60000) log(`⚠ La app estuvo congelada ${Math.round((now - lastBeat) / 1000)} s`);
+    lastBeat = now;
+    log(`♪ ${mmss(audio.currentTime)} de ${mmss(audio.duration)}`);
+  }
+});
+audio.addEventListener('play', () => { lastBeat = 0; });
+// «Sonando» = la app pide reproducir; «suena de verdad» = el iPhone ya está sacando sonido
+audio.addEventListener('playing', () => log(`🔊 Suena de verdad (${mmss(audio.currentTime)})`));
+for (const ev of ['stalled', 'waiting']) {
+  audio.addEventListener(ev, () => log(`Audio: «${ev}» en ${mmss(audio.currentTime)}`));
+}
+
+// Al volver a la app: ¿debería estar sonando y no avanza? Se registra y se intenta recuperar.
+let hiddenAt = null;
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    hiddenAt = { time: Date.now(), pos: audio.currentTime, playing: !audio.paused };
+    return;
+  }
+  const h = hiddenAt;
+  hiddenAt = null;
+  log(`Estado al volver: ${audio.paused ? 'en pausa' : 'sonando'} en ${mmss(audio.currentTime)}, listo=${audio.readyState}`);
+  if (!h || !h.playing || audio.paused || !current()) return;
+  const away = (Date.now() - h.time) / 1000;
+  const advanced = audio.currentTime - h.pos;
+  if (away > 20 && advanced < away / 3) {
+    log(`⚠ Mientras estaba bloqueado sólo avanzó ${Math.round(advanced)} s de ${Math.round(away)} s: se reanuda`);
+    const at = audio.currentTime;
+    // Comprobación rápida: si en 1,5 s no avanza, se recarga la canción en ese punto
+    setTimeout(() => {
+      if (!audio.paused && Math.abs(audio.currentTime - at) < 0.3) {
+        log('El audio seguía parado: se recarga la canción');
+        load(true, at);
+      }
+    }, 1500);
   }
 });
