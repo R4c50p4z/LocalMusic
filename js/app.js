@@ -3,6 +3,7 @@ import * as lib from './library.js';
 import * as player from './player.js';
 import { icon } from './icons.js';
 import * as stats from './stats.js';
+import * as debug from './debug.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const view = $('#view');
@@ -151,6 +152,7 @@ const routes = [
   [/^\/genre\/(.+)$/, viewGenre, 'search'],
   [/^\/settings$/, viewSettings, 'home'],
   [/^\/stats$/, viewStats, 'home'],
+  [/^\/debug$/, viewDebug, 'home'],
 ];
 
 let lastHash = null;
@@ -470,6 +472,7 @@ async function viewSettings() {
       ${plural(lib.songs.size, 'canción', 'canciones')} · ${fmtBytes(info.bytes)} usados${info.quota ? ` de ${fmtBytes(info.quota)} disponibles` : ''}
       <div class="bar"><div style="width:${pct.toFixed(1)}%"></div></div>
       <p>Las canciones se guardan dentro de la app; los archivos originales del móvil no se tocan.</p>
+      <p><a href="#/debug" style="text-decoration:underline">LocalMusic versión ${esc(debug.VERSION)} · Diagnóstico</a></p>
     </div>`;
 }
 
@@ -619,6 +622,28 @@ $('#backup-input').addEventListener('change', async (e) => {
     toast(err.message || 'No se pudo leer la copia', 4000);
   }
 });
+
+function viewDebug() {
+  const env = debug.environment();
+  const handlers = 'mediaSession' in navigator ? 'sí' : 'no (este navegador no los admite)';
+  const lines = debug.getLog();
+  view.innerHTML = `<header class="page-head"><a class="icon-btn" href="#/settings" aria-label="Volver">${icon('back')}</a><h1>Diagnóstico</h1></header>
+    <section class="panel" style="margin-top:0">
+      <div style="font-size:14px;line-height:1.7">
+        <b>Versión:</b> ${esc(env.version)}<br>
+        <b>Sistema:</b> ${esc(env.system)}<br>
+        <b>Abierta como:</b> ${env.installed ? 'app de la pantalla de inicio' : 'página del navegador'}<br>
+        <b>Controles de pantalla de bloqueo:</b> ${handlers}<br>
+        <b>Modo sin conexión:</b> ${env.serviceWorker ? 'activo' : 'no activo'}
+      </div>
+    </section>
+    <p class="hint">Aquí se apunta lo que pasa al reproducir (lo más reciente arriba). Si algo falla, haz una captura y envíala.</p>
+    <div class="btn-row" style="justify-content:flex-start;margin:8px 0">
+      <button class="btn small ghost" data-act="copy-log">Copiar</button>
+      <button class="btn small ghost" data-act="clear-log">Borrar registro</button>
+    </div>
+    <pre style="white-space:pre-wrap;font-size:12px;line-height:1.5;color:var(--muted);background:var(--bg-2);padding:12px;border-radius:8px">${esc(lines.join('\n')) || 'Sin eventos todavía. Pon una canción y bloquea el móvil.'}</pre>`;
+}
 
 function notFound() {
   view.innerHTML = `<div class="empty"><h2>No encontrado</h2><p>Puede que lo hayas borrado de tu biblioteca.</p><a class="btn" href="#/">Ir al inicio</a></div>`;
@@ -911,6 +936,13 @@ document.addEventListener('click', async (e) => {
         <b>iPhone (Safari):</b> botón Compartir → «Añadir a pantalla de inicio».</p>${opt('ok', 'close', 'Entendido')}`);
     }
     if (a === 'stats-period') { statsPeriod = act.dataset.p; return rerender(); }
+    if (a === 'copy-log') {
+      const env = debug.environment();
+      const text = `LocalMusic ${env.version} · ${env.system} · ${env.installed ? 'instalada' : 'navegador'}\n${debug.getLog().join('\n')}`;
+      try { await navigator.clipboard.writeText(text); toast('Registro copiado'); } catch { toast('No se pudo copiar; haz una captura'); }
+      return;
+    }
+    if (a === 'clear-log') { debug.clearLog(); return rerender(); }
     if (a === 'toggle-autoplay') {
       player.setAutoplay(!player.state.autoplay);
       toast(player.state.autoplay ? 'Al acabar la lista seguirá sonando música' : 'La música se parará al acabar la lista');
@@ -1168,6 +1200,19 @@ async function importShared() {
   await importShared();
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW', err));
+    // Busca versión nueva al abrir y al volver a la app; si la hay, recarga sola (salvo si suena música)
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloading) return;
+      if (player.isPlaying()) { toast('Hay una versión nueva: se aplicará al volver a abrir la app', 4000); return; }
+      reloading = true;
+      location.reload();
+    });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
+      reg.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+    }).catch(err => console.warn('SW', err));
+    debug.log(`App abierta (versión ${debug.VERSION})`);
   }
 })();
