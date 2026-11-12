@@ -1,6 +1,7 @@
 // Motor de reproducción: cola, aleatorio, repetir, pantalla de bloqueo.
 import * as lib from './library.js';
 import * as db from './db.js';
+import { log } from './debug.js';
 
 export const audio = document.getElementById('audio');
 export const bus = new EventTarget();
@@ -61,8 +62,9 @@ async function load(autoplay, startAt = 0) {
   const song = current();
   if (!song) return;
   countedPlay = false;
-  let url;
+  let url, preloadedHit = false;
   if (preloaded.id === song.id && preloaded.url) {
+    preloadedHit = true;
     // Camino rápido: sin esperas, todo ocurre en el mismo instante en que acaba la anterior
     url = preloaded.url;
     preloaded = { id: null, url: null };
@@ -80,11 +82,12 @@ async function load(autoplay, startAt = 0) {
   if (startAt) {
     audio.addEventListener('loadedmetadata', () => { audio.currentTime = startAt; }, { once: true });
   }
+  log(`Cargando «${song.title}»${preloadedHit ? ' (precargada)' : ''}`);
   const playing = autoplay ? audio.play() : null;
   emit('track', { song });
   saveState();
   if (playing) {
-    try { await playing; } catch (e) { if (e.name !== 'AbortError') console.warn(e); }
+    try { await playing; } catch (e) { if (e.name !== 'AbortError') { console.warn(e); log(`El sistema no dejó reproducir: ${e.name}`); } }
   }
   preloadNext();
 }
@@ -332,7 +335,8 @@ function registerMediaHandlers() {
   const h = (action, fn) => {
     try {
       ms.setActionHandler(action, fn && ((details) => {
-        try { fn(details); } catch (err) { console.warn('Acción', action, err); }
+        log(`Pantalla de bloqueo: botón «${action}»`);
+        try { fn(details); } catch (err) { log(`Error en «${action}»: ${err.message}`); }
       }));
     } catch { /* acción no soportada en este navegador */ }
   };
@@ -349,12 +353,13 @@ registerMediaHandlers();
 
 /* ------------------------------ Eventos audio ------------------------------ */
 
-audio.addEventListener('play', () => { registerMediaHandlers(); emit('state'); if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'; });
-audio.addEventListener('pause', () => { emit('state'); saveState(); if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused'; });
+audio.addEventListener('play', () => { log('▶ Sonando'); registerMediaHandlers(); emit('state'); if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'; });
+audio.addEventListener('pause', () => { log(`⏸ Pausa en ${Math.round(audio.currentTime)} s de ${Math.round(audio.duration || 0)} s`); emit('state'); saveState(); if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused'; });
 // Al acabar, la siguiente arranca en el mismo instante (está precargada) y la
 // pantalla de bloqueo sigue mostrando «reproduciendo» durante el cambio.
 audio.addEventListener('ended', () => {
   const id = current()?.id;
+  log(`Fin de canción (ended)${upcomingId() ? '' : ' — no hay siguiente'}`);
   if (id && endHandledFor === id) return; // el vigilante ya pasó a la siguiente
   endHandledFor = id;
   if ('mediaSession' in navigator && upcomingId()) navigator.mediaSession.playbackState = 'playing';
@@ -376,6 +381,7 @@ function forceEnded(reason) {
   if (!id || endHandledFor === id || audio.loop) return;
   endHandledFor = id;
   console.info('Fin de canción forzado:', reason);
+  log(`Fin de canción forzado: ${reason}`);
   if ('mediaSession' in navigator && upcomingId()) navigator.mediaSession.playbackState = 'playing';
   next(true);
 }
@@ -410,6 +416,7 @@ audio.addEventListener('seeking', () => {
 audio.addEventListener('loadedmetadata', updatePositionState);
 audio.addEventListener('error', () => {
   if (!audio.getAttribute('src')) return;
+  log(`Error de audio: código ${audio.error?.code}`);
   emit('error', { message: 'Este formato no se puede reproducir en este navegador' });
 });
 

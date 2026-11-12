@@ -1,9 +1,9 @@
 // Service worker: la app funciona sin conexión y recibe audio "compartido" desde otras apps.
-const VERSION = 'v5';
+const VERSION = 'v6';
 const CACHE = `localmusic-${VERSION}`;
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/styles.css',
-  'js/app.js', 'js/library.js', 'js/player.js', 'js/db.js', 'js/metadata.js', 'js/icons.js', 'js/stats.js',
+  'js/app.js', 'js/library.js', 'js/player.js', 'js/db.js', 'js/metadata.js', 'js/icons.js', 'js/stats.js', 'js/debug.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png',
 ];
 
@@ -38,7 +38,8 @@ self.addEventListener('fetch', (e) => {
   e.respondWith((async () => {
     const cache = await caches.open(CACHE);
     try {
-      const res = await fetch(e.request);
+      // Sin la caché HTTP del navegador: así siempre llega la última versión publicada
+      const res = await fetch(e.request, { cache: 'no-cache' });
       if (res.ok) cache.put(e.request, res.clone());
       return res;
     } catch {
