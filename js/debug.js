@@ -1,5 +1,5 @@
 // Versión de la app y registro de diagnóstico (sólo en el móvil, últimos 150 eventos).
-export const VERSION = '8 · 12 nov 2026';
+export const VERSION = '9 · 12 nov 2026';
 
 const KEY = 'localmusic-log';
 let entries = [];

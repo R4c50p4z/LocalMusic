@@ -472,7 +472,8 @@ async function viewSettings() {
       ${plural(lib.songs.size, 'canción', 'canciones')} · ${fmtBytes(info.bytes)} usados${info.quota ? ` de ${fmtBytes(info.quota)} disponibles` : ''}
       <div class="bar"><div style="width:${pct.toFixed(1)}%"></div></div>
       <p>Las canciones se guardan dentro de la app; los archivos originales del móvil no se tocan.</p>
-      <p><a href="#/debug" style="text-decoration:underline">LocalMusic versión ${esc(debug.VERSION)} · Diagnóstico</a></p>
+      <p>LocalMusic versión ${esc(debug.VERSION)} · <a href="#/debug" style="text-decoration:underline">Diagnóstico</a></p>
+      <button class="btn small ghost" data-act="check-update" style="margin-top:4px">Buscar actualizaciones</button>
     </div>`;
 }
 
@@ -622,6 +623,29 @@ $('#backup-input').addEventListener('change', async (e) => {
     toast(err.message || 'No se pudo leer la copia', 4000);
   }
 });
+
+// Compara con la versión publicada y, si hay una nueva, la instala y recarga
+async function checkUpdate() {
+  toast('Buscando actualizaciones…');
+  let latest = null;
+  try {
+    const txt = await (await fetch(`js/debug.js?t=${Date.now()}`, { cache: 'no-store' })).text();
+    latest = txt.match(/VERSION = '([^']+)'/)?.[1] || null;
+  } catch {
+    return toast('Sin conexión: no se puede comprobar ahora');
+  }
+  if (!latest || latest === debug.VERSION) return toast(`Ya tienes la última versión (${debug.VERSION})`);
+  toast(`Instalando la versión ${latest}…`, 6000);
+  debug.log(`Actualización manual: ${debug.VERSION} → ${latest}`);
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (reg) await reg.update();
+    // Se vacía la copia guardada de la app (no tu música) para que cargue todo nuevo
+    for (const k of await caches.keys()) if (k.startsWith('localmusic-') && k !== 'localmusic-share') await caches.delete(k);
+  } catch { /* se recarga igualmente */ }
+  player.pause();
+  setTimeout(() => location.reload(), 800);
+}
 
 function viewDebug() {
   const env = debug.environment();
@@ -936,6 +960,7 @@ document.addEventListener('click', async (e) => {
         <b>iPhone (Safari):</b> botón Compartir → «Añadir a pantalla de inicio».</p>${opt('ok', 'close', 'Entendido')}`);
     }
     if (a === 'stats-period') { statsPeriod = act.dataset.p; return rerender(); }
+    if (a === 'check-update') return checkUpdate();
     if (a === 'copy-log') {
       const env = debug.environment();
       const text = `LocalMusic ${env.version} · ${env.system} · ${env.installed ? 'instalada' : 'navegador'}\n${debug.getLog().join('\n')}`;
