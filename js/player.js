@@ -337,7 +337,7 @@ function registerMediaHandlers() {
   const h = (action, fn) => {
     try {
       ms.setActionHandler(action, fn && ((details) => {
-        log(`Pantalla de bloqueo: botón «${action}»`);
+        log(`Pantalla de bloqueo: botón «${action}»${action === 'seekto' ? ` → ${mmss(details?.seekTime)}` : ''}`);
         try { fn(details); } catch (err) { log(`Error en «${action}»: ${err.message}`); }
       }));
     } catch { /* acción no soportada en este navegador */ }
@@ -355,7 +355,7 @@ registerMediaHandlers();
 
 /* ------------------------------ Eventos audio ------------------------------ */
 
-audio.addEventListener('play', () => { log('▶ Sonando'); registerMediaHandlers(); emit('state'); if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'; });
+audio.addEventListener('play', () => { log('▶ Pide sonar'); registerMediaHandlers(); emit('state'); if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'; });
 audio.addEventListener('pause', () => { log(`⏸ Pausa en ${Math.round(audio.currentTime)} s de ${Math.round(audio.duration || 0)} s`); emit('state'); saveState(); if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused'; });
 // Al acabar, la siguiente arranca en el mismo instante (está precargada) y la
 // pantalla de bloqueo sigue mostrando «reproduciendo» durante el cambio.
@@ -458,6 +458,8 @@ audio.addEventListener('timeupdate', () => {
   }
 });
 audio.addEventListener('play', () => { lastBeat = 0; });
+// «Sonando» = la app pide reproducir; «suena de verdad» = el iPhone ya está sacando sonido
+audio.addEventListener('playing', () => log(`🔊 Suena de verdad (${mmss(audio.currentTime)})`));
 for (const ev of ['stalled', 'waiting']) {
   audio.addEventListener(ev, () => log(`Audio: «${ev}» en ${mmss(audio.currentTime)}`));
 }
