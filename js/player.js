@@ -103,9 +103,14 @@ async function load(autoplay, startAt = 0) {
   if (startAt) {
     // En iPhone el audio no se carga hasta darle a play: si mientras tanto eliges otra
     // canción, esta posición guardada NO debe aplicarse a la nueva.
-    audio.addEventListener('loadedmetadata', () => { if (token === loadToken) audio.currentTime = startAt; }, { once: true });
+    audio.addEventListener('loadedmetadata', () => {
+      if (token !== loadToken) return;
+      audio.currentTime = startAt;
+      pendingStart = null;
+    }, { once: true });
   }
   log(`Cargando «${song.title}»${preloadedHit ? ' (precargada)' : ''}`);
+  pendingStart = !autoplay && startAt ? startAt : null;
   const playing = autoplay ? playAudio() : null;
   emit('track', { song });
   saveState();
@@ -162,14 +167,19 @@ const repeatingOne = () => state.repeat === 'one';
 
 export function toggle() {
   if (!current()) return;
-  if (audio.paused) playAudio().catch(() => {}); else pause();
+  if (audio.paused) play(); else pause();
 }
 export function play() {
   if (!current()) return;
+  // Canción recuperada de la sesión anterior y aún sin cargar (en iPhone el audio no se
+  // carga hasta darle a play): se carga de nuevo arrancando ya en la posición guardada.
+  // Saltar a esa posición mientras el audio arranca lo dejaba atascado en «waiting».
+  if (pendingStart !== null && audio.readyState === 0) { load(true, pendingStart); return; }
   // Si el navegador descartó el audio mientras estaba en pausa, se vuelve a cargar
   if (!audio.currentSrc || audio.error) load(true, audio.currentTime || 0);
   else playAudio().catch(() => {});
 }
+let pendingStart = null; // posición a recuperar de una canción cargada sin reproducir
 let userPaused = false;
 let endHandledFor = null; // canción cuyo final ya se gestionó
 export function pause() { userPaused = true; audio.pause(); }
@@ -508,14 +518,21 @@ document.addEventListener('visibilitychange', () => {
   const away = (Date.now() - h.time) / 1000;
   const advanced = audio.currentTime - h.pos;
   if (away > 20 && advanced < away / 3) {
-    log(`⚠ Mientras estaba bloqueado sólo avanzó ${Math.round(advanced)} s de ${Math.round(away)} s: se reanuda`);
+    log(`⚠ Mientras estaba bloqueado sólo avanzó ${Math.round(advanced)} s de ${Math.round(away)} s`);
+    // Al volver, el iPhone suele reanudar el sonido él solo, pero tarda unos segundos en
+    // dar la posición real. Sólo si en 5 s no avanza NADA se recarga la canción (en ese
+    // mismo punto, que es donde se quedó: así no hay saltos hacia atrás).
     const at = audio.currentTime;
-    // Comprobación rápida: si en 1,5 s no avanza, se recarga la canción en ese punto
+    const token = loadToken;
+    let moved = false;
+    const onTime = () => { if (Math.abs(audio.currentTime - at) > 0.5) moved = true; };
+    audio.addEventListener('timeupdate', onTime);
     setTimeout(() => {
-      if (!audio.paused && Math.abs(audio.currentTime - at) < 0.3) {
-        log('El audio seguía parado: se recarga la canción');
-        load(true, at);
-      }
-    }, 1500);
+      audio.removeEventListener('timeupdate', onTime);
+      if (token !== loadToken || audio.paused) return;
+      if (moved || Math.abs(audio.currentTime - at) > 0.5) { log('El audio se reanudó solo'); return; }
+      log('El audio seguía parado: se recarga la canción en el mismo punto');
+      load(true, at);
+    }, 5000);
   }
 });
