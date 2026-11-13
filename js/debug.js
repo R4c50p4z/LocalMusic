@@ -1,5 +1,5 @@
 // Versión de la app y registro de diagnóstico (sólo en el móvil, últimos 150 eventos).
-export const VERSION = '9 · 12 nov 2026';
+export const VERSION = '10 · 13 nov 2026';
 
 const KEY = 'localmusic-log';
 let entries = [];
@@ -38,6 +38,7 @@ export function environment() {
     system: systemName(),
     installed: window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true,
     mediaSession: 'mediaSession' in navigator,
+    audioSession: navigator.audioSession ? navigator.audioSession.type : null,
     serviceWorker: !!navigator.serviceWorker?.controller,
   };
 }

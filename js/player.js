@@ -18,6 +18,27 @@ export const state = {
   autoNextId: null,   // canción elegida para la reproducción automática
 };
 
+const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+// Le dice a iOS (17 o posterior) que esto es un reproductor de música: con el tipo por
+// defecto, iOS puede tratar el sonido como «ambiente» y cortarlo al bloquear el móvil.
+// Se reafirma antes de cada play y al volver a la app, porque iOS puede olvidarlo.
+function ensureAudioSession() {
+  try {
+    if (navigator.audioSession && navigator.audioSession.type !== 'playback') {
+      navigator.audioSession.type = 'playback';
+      log('Sesión de audio: «playback» (reproductor de música)');
+    }
+  } catch { /* navegador sin esta función */ }
+}
+ensureAudioSession();
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') ensureAudioSession(); });
+
+function playAudio() {
+  ensureAudioSession();
+  return audio.play();
+}
+
 let currentUrl = null;
 let loadToken = 0;
 let countedPlay = false;
@@ -85,7 +106,7 @@ async function load(autoplay, startAt = 0) {
     audio.addEventListener('loadedmetadata', () => { if (token === loadToken) audio.currentTime = startAt; }, { once: true });
   }
   log(`Cargando «${song.title}»${preloadedHit ? ' (precargada)' : ''}`);
-  const playing = autoplay ? audio.play() : null;
+  const playing = autoplay ? playAudio() : null;
   emit('track', { song });
   saveState();
   if (playing) {
@@ -132,17 +153,22 @@ async function preloadNext() {
 }
 
 // Repetir una canción con el bucle nativo del navegador: no hay «fin», así que nunca se corta
-function applyLoop() { audio.loop = state.repeat === 'one'; }
+// En iPhone, como app instalada, cuando una canción llega a su final natural iOS cierra
+// la sesión de audio y no deja abrir otra con la pantalla bloqueada: la siguiente no
+// suena y los controles dejan de responder. Por eso allí el audio va siempre en bucle
+// (nunca «termina») y la app cambia de canción ella misma al llegar al final.
+function applyLoop() { audio.loop = state.repeat === 'one' || IS_IOS; }
+const repeatingOne = () => state.repeat === 'one';
 
 export function toggle() {
   if (!current()) return;
-  if (audio.paused) audio.play().catch(() => {}); else pause();
+  if (audio.paused) playAudio().catch(() => {}); else pause();
 }
 export function play() {
   if (!current()) return;
   // Si el navegador descartó el audio mientras estaba en pausa, se vuelve a cargar
   if (!audio.currentSrc || audio.error) load(true, audio.currentTime || 0);
-  else audio.play().catch(() => {});
+  else playAudio().catch(() => {});
 }
 let userPaused = false;
 let endHandledFor = null; // canción cuyo final ya se gestionó
@@ -152,7 +178,7 @@ export async function next(auto = false) {
   if (!state.queue.length) return;
   if (auto && state.repeat === 'one') { // por si el bucle nativo no estaba activo
     audio.currentTime = 0;
-    audio.play().catch(() => {});
+    playAudio().catch(() => {});
     return;
   }
   if (state.index < state.queue.length - 1) state.index++;
@@ -380,7 +406,7 @@ function nearEnd() {
 }
 function forceEnded(reason) {
   const id = current()?.id;
-  if (!id || endHandledFor === id || audio.loop) return;
+  if (!id || endHandledFor === id || repeatingOne()) return;
   endHandledFor = id;
   console.info('Fin de canción forzado:', reason);
   log(`Fin de canción forzado: ${reason}`);
@@ -389,7 +415,7 @@ function forceEnded(reason) {
 }
 bus.addEventListener('track', () => { endHandledFor = null; watchPos = -1; watchStill = 0; });
 setInterval(() => {
-  if (audio.paused || audio.loop || !current()) { watchStill = 0; return; }
+  if (audio.paused || repeatingOne() || !current()) { watchStill = 0; return; }
   if (Math.abs(audio.currentTime - watchPos) < 0.05) watchStill++; else watchStill = 0;
   watchPos = audio.currentTime;
   if (watchStill >= 2 && nearEnd()) forceEnded('el audio dejó de avanzar');
@@ -399,15 +425,14 @@ setInterval(() => {
 // el archivo está en el móvil, de modo que «esperando datos» al final es un atasco.
 for (const ev of ['stalled', 'waiting']) {
   audio.addEventListener(ev, () => {
-    if (!audio.paused && !audio.loop && nearEnd()) forceEnded(ev);
+    if (!audio.paused && !repeatingOne() && nearEnd()) forceEnded(ev);
   });
 }
-const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 if (IS_IOS) {
   // En iPhone, a veces llega al final y nunca avisa: se pasa a la siguiente en el último instante
   audio.addEventListener('timeupdate', () => {
     const d = audio.duration;
-    if (!audio.loop && Number.isFinite(d) && d > 1 && audio.currentTime >= d - 0.2) forceEnded('final de la canción (iOS)');
+    if (!repeatingOne() && Number.isFinite(d) && d > 1 && audio.currentTime >= d - 0.35) forceEnded('final de la canción (iOS)');
   });
 }
 // Algunas versiones de iOS lanzan «pause» en vez de «ended» al acabar
@@ -416,12 +441,17 @@ audio.addEventListener('pause', () => {
   userPaused = false;
 });
 
-// Cada vuelta del bucle de «repetir una» cuenta como una reproducción nueva
+// El audio ha dado la vuelta (bucle): con «repetir una» es una reproducción nueva;
+// si no, es el final de la canción (en iPhone el bucle está siempre puesto).
 let lastPos = 0;
 audio.addEventListener('seeking', () => {
   if (audio.loop && audio.duration && lastPos > audio.duration - 1.5 && audio.currentTime < 1.5) {
-    countedPlay = false;
-    emit('loop');
+    if (repeatingOne()) {
+      countedPlay = false;
+      emit('loop');
+    } else {
+      forceEnded('vuelta del bucle');
+    }
   }
 });
 audio.addEventListener('loadedmetadata', updatePositionState);

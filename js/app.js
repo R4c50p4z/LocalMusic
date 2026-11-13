@@ -658,6 +658,7 @@ function viewDebug() {
         <b>Sistema:</b> ${esc(env.system)}<br>
         <b>Abierta como:</b> ${env.installed ? 'app de la pantalla de inicio' : 'página del navegador'}<br>
         <b>Controles de pantalla de bloqueo:</b> ${handlers}<br>
+        <b>Sesión de audio:</b> ${env.audioSession ? esc(env.audioSession) : 'no disponible en este navegador'}<br>
         <b>Modo sin conexión:</b> ${env.serviceWorker ? 'activo' : 'no activo'}
       </div>
     </section>
