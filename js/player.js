@@ -34,6 +34,14 @@ function ensureAudioSession() {
 ensureAudioSession();
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') ensureAudioSession(); });
 
+function reactivateAudioSession() {
+  try {
+    if (!navigator.audioSession) return;
+    navigator.audioSession.type = 'auto';
+    navigator.audioSession.type = 'playback';
+  } catch { /* sin soporte */ }
+}
+
 function playAudio() {
   ensureAudioSession();
   return audio.play();
@@ -182,10 +190,18 @@ export function play() {
   // iOS puede dejar que el audio «suene» sin devolverle el altavoz. Volver a cargar la
   // canción en el mismo punto reactiva el sonido (como pausar y darle a play en la app).
   if (interrupted && IS_IOS) {
-    interrupted = false;
-    log(`Reanudando tras una interrupción: se recarga en ${Math.round(audio.currentTime)} s`);
-    load(true, audio.currentTime || 0);
-    return;
+    if (document.visibilityState === 'visible') {
+      // Con la app abierta, recargar en el mismo punto reactiva el sonido
+      interrupted = false;
+      log(`Reanudando tras una interrupción: se recarga en ${Math.round(audio.currentTime)} s`);
+      load(true, audio.currentTime || 0);
+      return;
+    }
+    // Con el móvil bloqueado el iPhone no deja leer la música para recargarla (se queda
+    // sin datos y en silencio): se reactiva la sesión de audio y se reanuda sin recargar.
+    // Si aun así no se oye, se recarga en cuanto se abra la app.
+    log('Reanudando tras una interrupción (móvil bloqueado): se reactiva la sesión de audio');
+    reactivateAudioSession();
   }
   playAudio().catch(() => {});
 }
@@ -230,6 +246,7 @@ export async function prev() {
   // Si ya lleva unos segundos, «anterior» vuelve al principio (como en cualquier reproductor)
   const atStart = state.index === 0 && state.repeat !== 'all';
   if (audio.currentTime > 3 || atStart || state.queue.length === 1) {
+    expectJumpUntil = Date.now() + 1500;
     audio.currentTime = 0;
     if (audio.paused) play();
     return;
@@ -246,8 +263,10 @@ export async function jumpTo(queueIndex) {
   await load(true);
 }
 
+let expectJumpUntil = 0; // saltos de posición hechos a propósito (barra, «anterior»)
 export function seek(seconds) {
   if (!Number.isFinite(audio.duration)) return;
+  expectJumpUntil = Date.now() + 1500;
   audio.currentTime = Math.max(0, Math.min(audio.duration, seconds));
 }
 
@@ -472,6 +491,7 @@ audio.addEventListener('playing', () => { if (!IS_IOS) interrupted = false; });
 try {
   navigator.audioSession?.addEventListener?.('statechange', () => {
     const st = navigator.audioSession.state;
+    if (st === undefined) return; // iOS avisa del cambio pero no dice el estado
     log(`Sesión de audio: ${{ active: 'activa', interrupted: 'interrumpida', inactive: 'inactiva' }[st] || st}`);
     if (st === 'interrupted') interrupted = true;
   });
@@ -480,17 +500,24 @@ try {
 // El audio ha dado la vuelta (bucle): con «repetir una» es una reproducción nueva;
 // si no, es el final de la canción (en iPhone el bucle está siempre puesto).
 let lastPos = 0;
-audio.addEventListener('seeking', () => {
-  if (audio.loop && audio.duration && lastPos > audio.duration - 1.5 && audio.currentTime < 1.5) {
-    if (repeatingOne()) {
-      countedPlay = false;
-      emit('loop');
-    } else {
-      forceEnded('vuelta del bucle');
-    }
+bus.addEventListener('track', () => { lastPos = 0; });
+let loopToken = -1; // evita contar dos veces la misma vuelta (seeking + timeupdate)
+function onLoopWrap(how) {
+  if (loopToken === `${loadToken}:${Math.floor(Date.now() / 3000)}`) return;
+  loopToken = `${loadToken}:${Math.floor(Date.now() / 3000)}`;
+  if (repeatingOne()) {
+    countedPlay = false;
+    emit('loop');
+  } else {
+    forceEnded(`vuelta del bucle (${how})`);
   }
+}
+audio.addEventListener('seeking', () => {
+  if (audio.loop && audio.duration && Date.now() > expectJumpUntil && lastPos > audio.duration - 1.5 && audio.currentTime < 1.5) onLoopWrap('seeking');
 });
+
 audio.addEventListener('loadedmetadata', updatePositionState);
+for (const ev of ['play', 'pause', 'playing', 'seeked']) audio.addEventListener(ev, updatePositionState);
 audio.addEventListener('error', () => {
   if (!audio.getAttribute('src')) return;
   log(`Error de audio: código ${audio.error?.code}`);
@@ -501,6 +528,11 @@ let lastSaved = 0;
 audio.addEventListener('timeupdate', () => {
   emit('time');
   const t = audio.currentTime;
+  // Con la pantalla bloqueada los avisos llegan espaciados: si la posición salta desde
+  // los últimos segundos al principio sin que nadie haya movido la barra, ha dado la vuelta.
+  const d = audio.duration;
+  if (audio.loop && Number.isFinite(d) && d > 10 && Date.now() > expectJumpUntil &&
+      lastPos > d - 15 && t < 15 && t < lastPos - 5) onLoopWrap('timeupdate');
   lastPos = t;
   if (Math.abs(t - lastSaved) > 5) { lastSaved = t; saveState(); updatePositionState(); }
   // Cuenta una reproducción al pasar 30 s (o la mitad si es corta)
@@ -532,6 +564,10 @@ for (const ev of ['stalled', 'waiting']) {
 
 // Al volver a la app: ¿debería estar sonando y no avanza? Se registra y se intenta recuperar.
 let hiddenAt = null;
+let stallPos = null; // dónde se atascó el audio por falta de datos
+audio.addEventListener('stalled', () => { if (stallPos === null) stallPos = audio.currentTime; });
+audio.addEventListener('playing', () => { stallPos = null; });
+bus.addEventListener('track', () => { stallPos = null; });
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
     hiddenAt = { time: Date.now(), pos: audio.currentTime, playing: !audio.paused };
@@ -540,6 +576,15 @@ document.addEventListener('visibilitychange', () => {
   const h = hiddenAt;
   hiddenAt = null;
   log(`Estado al volver: ${audio.paused ? 'en pausa' : 'sonando'} en ${mmss(audio.currentTime)}, listo=${audio.readyState}`);
+  if (!audio.paused && current() && (audio.readyState < 2 || (interrupted && IS_IOS))) {
+    // «Sonando» sin datos (la barra avanza en silencio) o reanudada tras una interrupción
+    // con el móvil bloqueado: se recarga donde se atascó para recuperar el sonido.
+    const at = audio.readyState < 2 && stallPos !== null ? stallPos : audio.currentTime;
+    interrupted = false;
+    log(`Recuperando el sonido: se recarga en ${mmss(at)}`);
+    load(true, at);
+    return;
+  }
   if (!h || !h.playing || audio.paused || !current()) return;
   const away = (Date.now() - h.time) / 1000;
   const advanced = audio.currentTime - h.pos;
