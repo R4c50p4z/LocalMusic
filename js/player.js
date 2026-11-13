@@ -98,6 +98,7 @@ async function load(autoplay, startAt = 0) {
   if (currentUrl && currentUrl !== url) URL.revokeObjectURL(currentUrl);
   currentUrl = url;
   updateMediaSession(song);
+  ignorePauseUntil = Date.now() + 1000; // cambiar de canción no es una interrupción
   audio.src = url;
   applyLoop();
   if (startAt) {
@@ -176,9 +177,19 @@ export function play() {
   // Saltar a esa posición mientras el audio arranca lo dejaba atascado en «waiting».
   if (pendingStart !== null && audio.readyState === 0) { load(true, pendingStart); return; }
   // Si el navegador descartó el audio mientras estaba en pausa, se vuelve a cargar
-  if (!audio.currentSrc || audio.error) load(true, audio.currentTime || 0);
-  else playAudio().catch(() => {});
+  if (!audio.currentSrc || audio.error) { load(true, audio.currentTime || 0); return; }
+  // Tras una interrupción (otra app puso su sonido, una llamada, quitar los auriculares…)
+  // iOS puede dejar que el audio «suene» sin devolverle el altavoz. Volver a cargar la
+  // canción en el mismo punto reactiva el sonido (como pausar y darle a play en la app).
+  if (interrupted && IS_IOS) {
+    interrupted = false;
+    log(`Reanudando tras una interrupción: se recarga en ${Math.round(audio.currentTime)} s`);
+    load(true, audio.currentTime || 0);
+    return;
+  }
+  playAudio().catch(() => {});
 }
+let interrupted = false;  // el sistema pausó la música (no fue el usuario)
 let pendingStart = null; // posición a recuperar de una canción cargada sin reproducir
 let userPaused = false;
 let endHandledFor = null; // canción cuyo final ya se gestionó
@@ -205,7 +216,7 @@ export async function next(auto = false) {
   } else if (!auto) {
     state.index = 0;
   } else {
-    audio.pause();
+    pause(); // fin de la lista: pausa normal, no una interrupción
     audio.currentTime = 0;
     emit('state');
     return;
@@ -446,10 +457,25 @@ if (IS_IOS) {
   });
 }
 // Algunas versiones de iOS lanzan «pause» en vez de «ended» al acabar
+let ignorePauseUntil = 0;
 audio.addEventListener('pause', () => {
   if (!audio.ended && !userPaused && nearEnd() && audio.currentTime >= (audio.duration || Infinity) - 0.6) forceEnded('pausa al final');
+  else if (!userPaused && !audio.ended && Date.now() > ignorePauseUntil) {
+    interrupted = true;
+    log('Pausa del sistema (interrupción: otra app, llamada, auriculares…)');
+  }
   userPaused = false;
 });
+audio.addEventListener('playing', () => { if (!IS_IOS) interrupted = false; });
+
+// Estado de la sesión de audio de iOS (activa / interrumpida / inactiva)
+try {
+  navigator.audioSession?.addEventListener?.('statechange', () => {
+    const st = navigator.audioSession.state;
+    log(`Sesión de audio: ${{ active: 'activa', interrupted: 'interrumpida', inactive: 'inactiva' }[st] || st}`);
+    if (st === 'interrupted') interrupted = true;
+  });
+} catch { /* sin soporte */ }
 
 // El audio ha dado la vuelta (bucle): con «repetir una» es una reproducción nueva;
 // si no, es el final de la canción (en iPhone el bucle está siempre puesto).
