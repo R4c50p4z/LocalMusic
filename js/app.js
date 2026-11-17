@@ -316,6 +316,23 @@ function renderResults() {
 
 const playlistRow = (p) => `<a class="item" href="#/playlist/${p.id}">${playlistCover(p)}<div class="txt"><div class="t">${esc(p.name)}</div><div class="s">Playlist · ${plural(p.songIds.length, 'canción', 'canciones')}</div></div></a>`;
 
+// Orden de los artistas en la biblioteca (se recuerda en este móvil)
+const ARTIST_SORTS = { songs: 'Nº de canciones', time: 'Tiempo escuchado', name: 'Nombre' };
+let artistSort = 'songs';
+try { artistSort = localStorage.getItem('localmusic-artist-sort') || 'songs'; } catch { /* sin almacenamiento */ }
+if (!ARTIST_SORTS[artistSort]) artistSort = 'songs';
+
+function sortedArtists() {
+  const list = lib.artists();
+  if (artistSort === 'name') return list;
+  if (artistSort === 'time') {
+    const secs = new Map(stats.compute('all').topArtists.map(a => [a.key, a.seconds]));
+    for (const a of list) a.seconds = secs.get(a.key) || 0;
+    return list.sort((x, y) => y.seconds - x.seconds || y.songs.length - x.songs.length || lib.cmp(x.name, y.name));
+  }
+  return list.sort((x, y) => y.songs.length - x.songs.length || lib.cmp(x.name, y.name));
+}
+
 function viewLibrary() {
   const f = new URLSearchParams(location.hash.split('?')[1] || '').get('f') || '';
   const chip = (k, label) => `<a class="chip${f === k ? ' active' : ''}" href="#/library${k && f !== k ? '?f=' + k : ''}">${label}</a>`;
@@ -334,7 +351,11 @@ function viewLibrary() {
     if (f === 'playlists') rows.push(`<button class="item" data-act="new-playlist"><div class="cover" style="display:grid;place-items:center;background:var(--bg-3)">${icon('plus')}</div><div class="txt"><div class="t">Crear playlist</div></div></button>`);
   }
   if (!f || f === 'artists') {
-    for (const a of lib.artists()) rows.push(`<a class="item round" href="#/artist/${enc(a.key)}">${coverImg(lib.coverUrl(a.coverId), 'cover', a.name)}<div class="txt"><div class="t">${esc(a.name)}</div><div class="s">Artista · ${plural(a.songs.length, 'canción', 'canciones')}</div></div></a>`);
+    if (f === 'artists') rows.push(`<div class="sort-row"><span>${plural(lib.artists().length, 'artista', 'artistas')}</span><button class="btn small ghost" data-act="sort-artists">${icon('sort')} ${ARTIST_SORTS[artistSort]}</button></div>`);
+    for (const a of sortedArtists()) {
+      const extra = artistSort === 'time' ? ` · ${a.seconds >= 60 ? fmtListen(a.seconds) : 'sin escuchar'}` : '';
+      rows.push(`<a class="item round" href="#/artist/${enc(a.key)}">${coverImg(lib.coverUrl(a.coverId), 'cover', a.name)}<div class="txt"><div class="t">${esc(a.name)}</div><div class="s">Artista · ${plural(a.songs.length, 'canción', 'canciones')}${extra}</div></div></a>`);
+    }
   }
   if (!f || f === 'albums') {
     for (const a of lib.albums()) rows.push(`<a class="item" href="#/album/${enc(a.key)}">${coverImg(lib.coverUrl(a.coverId), 'cover', a.name)}<div class="txt"><div class="t">${esc(a.name)}</div><div class="s">Álbum · ${esc(a.artist)}</div></div></a>`);
@@ -948,6 +969,15 @@ document.addEventListener('click', async (e) => {
     });
     if (a === 'playlist-menu') return playlistMenu(act.dataset.id);
     if (a === 'add-songs-to') return addSongsTo(act.dataset.id);
+    if (a === 'sort-artists') {
+      const set = (k) => () => {
+        artistSort = k;
+        try { localStorage.setItem('localmusic-artist-sort', k); } catch { /* sin almacenamiento */ }
+        rerender();
+      };
+      return openSheet(`<h3 style="margin-bottom:8px">Ordenar artistas por</h3>${opt('songs', 'note', 'Nº de canciones')}${opt('time', 'clock', 'Tiempo escuchado')}${opt('name', 'sort', 'Nombre')}`,
+        { songs: set('songs'), time: set('time'), name: set('name') });
+    }
     if (a === 'sort-songs') {
       return openSheet(`<h3 style="margin-bottom:8px">Ordenar por</h3>${opt('title', 'sort', 'Título')}${opt('artist', 'artist', 'Artista')}${opt('recent', 'plus', 'Añadidas recientemente')}`, {
         title: () => { songSort = 'title'; rerender(); }, artist: () => { songSort = 'artist'; rerender(); }, recent: () => { songSort = 'recent'; rerender(); },
