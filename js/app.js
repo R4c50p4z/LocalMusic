@@ -383,7 +383,7 @@ function viewAlbum(key) {
     title: a.name,
     cover: coverImg(lib.coverUrl(a.coverId), 'hero-cover', a.name),
     coverUrl: lib.coverUrl(a.coverId),
-    owner: `<a href="#/artist/${enc(a.artist.toLowerCase())}">${esc(a.artist)}</a>`,
+    owner: `<a href="#/artist/${enc(lib.artistKey(a.artist))}">${esc(a.artist)}</a>`,
     sub: `Álbum${a.year ? ' · ' + a.year : ''} · ${plural(a.songs.length, 'canción', 'canciones')}, ${fmtTotal(a.songs)}`,
     ctx, ids: a.songs.map(s => s.id),
     body: songRows(a.songs, ctx, { numbers: true }),
@@ -394,7 +394,7 @@ function viewArtist(key) {
   const a = lib.artist(key);
   if (!a) {
     // Puede ser un "artista del álbum" que no coincide con ningún artista de pista
-    const als = lib.albums().filter(al => al.artist.toLowerCase() === key);
+    const als = lib.albums().filter(al => lib.artistKey(al.artist) === key);
     if (!als.length) return notFound();
     const songs = als.flatMap(al => al.songs);
     return viewArtistData({ key, name: als[0].artist, songs, coverId: als[0].coverId, albumList: als });
@@ -410,6 +410,7 @@ function viewArtistData(a) {
     body += `<details><summary class="btn small ghost" style="margin:12px 0">Ver las ${a.songs.length}</summary>${songRows(a.songs.slice(10), ctx)}</details>`;
   }
   if (a.albumList?.length) body += `<h2 class="section-title">Discografía</h2><div class="row">${a.albumList.map(albumCard).join('')}</div>`;
+  if (a.appearsOn?.length) body += `<h2 class="section-title">Aparece en</h2><div class="row">${a.appearsOn.map(albumCard).join('')}</div>`;
   hero({
     title: a.name, round: true,
     cover: coverImg(lib.coverUrl(a.coverId), 'hero-cover', a.name),
@@ -782,10 +783,19 @@ function songMenu(id, listInfo) {
     next: () => { player.playNext([id]); toast('Se reproducirá a continuación'); },
     queue: () => { player.addToQueue([id]); toast('Añadida a la cola'); },
     album: () => go(`#/album/${enc(lib.albumKey(s))}`),
-    artist: () => go(`#/artist/${enc(s.artist.toLowerCase())}`),
+    artist: () => goToArtist(s),
     edit: () => editSong(id),
     delete: () => confirmDelete([id], `«${s.title}»`),
   });
+}
+
+/** Ir a la página del artista; si la canción es una colaboración, se elige cuál. */
+function goToArtist(s) {
+  const names = lib.songArtists(s);
+  if (names.length === 1) return go(`#/artist/${enc(lib.artistKey(names[0]))}`);
+  const handlers = {};
+  names.forEach((n, i) => { handlers['a' + i] = () => go(`#/artist/${enc(lib.artistKey(n))}`); });
+  openSheet(`<h3 style="margin-bottom:8px">Artistas</h3>${names.map((n, i) => opt('a' + i, 'artist', esc(n))).join('')}`, handlers);
 }
 
 function pickPlaylist(songIds) {
@@ -1080,7 +1090,7 @@ P.like.addEventListener('click', likeCurrent);
 P.miniLike.addEventListener('click', likeCurrent);
 P.artist.addEventListener('click', () => {
   const s = player.current();
-  if (s) go(`#/artist/${enc(s.artist.toLowerCase())}`);
+  if (s) goToArtist(s);
 });
 P.from.parentElement.addEventListener('click', () => {
   const href = player.state.context?.href;

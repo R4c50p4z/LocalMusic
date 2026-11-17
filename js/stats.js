@@ -160,8 +160,22 @@ export function compute(period = '7d', now = Date.now()) {
     return [...m.values()].sort((a, b) => b.seconds - a.seconds);
   };
   const topSongs = group(r => r.fileKey || r.songId, r => ({ songId: currentId(r), title: r.title, artist: r.artist, album: r.album, coverId: r.coverId }));
-  const topArtists = group(r => r.artist.toLowerCase(), r => ({ name: r.artist, key: r.artist.toLowerCase() }));
-  const topAlbums = group(r => r.albumKey, r => ({ name: r.album, artist: r.artist, key: r.albumKey }));
+  // Una colaboración suma para cada uno de sus artistas
+  const artistMap = new Map();
+  for (const r of list) {
+    for (const name of lib.songArtists({ artist: r.artist || '', title: r.title || '' })) {
+      const k = lib.artistKey(name);
+      let g = artistMap.get(k);
+      if (!g) { g = { name, key: k, seconds: 0, plays: 0, coverId: null }; artistMap.set(k, g); }
+      g.seconds += r.seconds;
+      if (isPlay(r)) g.plays++;
+      if (!g.coverId && r.coverId) g.coverId = r.coverId;
+    }
+  }
+  const topArtists = [...artistMap.values()].sort((a, b) => b.seconds - a.seconds);
+  // Álbum según la agrupación actual (si la canción sigue en la biblioteca)
+  const albumOf = (r) => { const s = lib.songs.get(currentId(r)); return s ? { key: lib.albumKey(s), artist: lib.mainArtist(s) } : { key: r.albumKey, artist: r.artist }; };
+  const topAlbums = group(r => albumOf(r).key, r => ({ name: r.album, artist: albumOf(r).artist, key: albumOf(r).key }));
 
   // Días con escucha (≥ 1 min) para rachas
   const daySecs = new Map();

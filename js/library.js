@@ -33,7 +33,47 @@ export const cmp = (a, b) => collator.compare(a, b);
 export function coverUrl(coverId) { return coverId ? covers.get(coverId) || '' : ''; }
 export function songCover(song) { return song ? coverUrl(song.coverId) : ''; }
 
-export const albumKey = (s) => `${(s.albumArtist || s.artist).toLowerCase()}\u0001${s.album.toLowerCase()}`;
+/* ------------------------- Artistas y colaboraciones ------------------------- */
+// «La Pantera, Quevedo», «Bad Bunny & Jhay Cortez», «Rosalía x The Weeknd»,
+// «Quevedo feat. Myke Towers»… son varios artistas: la canción cuenta para cada uno.
+// (No se separa por « y », que forma parte de muchos nombres.)
+const ARTIST_SEP = /\s*(?:[,;]|\s\/\s|\s&\s|\s(?:x|X|feat\.?|Feat\.?|FEAT\.?|ft\.?|Ft\.?|FT\.?|featuring|Featuring|with|With)\s)\s*/;
+// Nombres que llevan coma o «&» pero son un solo artista
+const ONE_ARTIST = ['Tyler, The Creator', 'Simon & Garfunkel', 'Earth, Wind & Fire', 'Hall & Oates',
+  'Mumford & Sons', 'Crosby, Stills, Nash & Young', 'Florence + the Machine', 'Marlon & Cris', 'Andy & Lucas',
+  'Ella Baila Sola', 'Chimo Bayo & Friends', 'Los Del Río', 'Calle 13'];
+const ONE_ARTIST_RE = new RegExp(ONE_ARTIST.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
+export const artistKey = (name) => name.trim().toLowerCase();
+
+export function splitArtists(text) {
+  // Se protegen los nombres conocidos antes de partir y se restauran después
+  const kept = [];
+  const masked = String(text || '').replace(ONE_ARTIST_RE, (m) => `\u0002${kept.push(m) - 1}\u0003`);
+  return masked.split(ARTIST_SEP)
+    .map(x => x.replace(/\u0002(\d+)\u0003/g, (_, i) => kept[+i]).trim())
+    .filter(Boolean);
+}
+
+const artistsCache = new WeakMap();
+/** Todos los artistas de una canción: los del campo artista y los «(feat. …)» del título. */
+export function songArtists(s) {
+  let names = artistsCache.get(s);
+  if (names && names.src === s.artist + '\u0001' + s.title) return names.list;
+  const list = splitArtists(s.artist);
+  const feat = s.title.match(/[([]\s*(?:feat\.?|ft\.?|featuring|with|con)\s+([^)\]]+)[)\]]/i);
+  if (feat) list.push(...splitArtists(feat[1]));
+  const seen = new Set();
+  const out = list.filter(n => { const k = artistKey(n); if (seen.has(k)) return false; seen.add(k); return true; });
+  if (!out.length) out.push(s.artist || 'Artista desconocido');
+  artistsCache.set(s, { src: s.artist + '\u0001' + s.title, list: out });
+  return out;
+}
+
+export const mainArtist = (s) => songArtists(s)[0];
+const albumOwner = (s) => (s.albumArtist ? splitArtists(s.albumArtist)[0] || s.albumArtist : mainArtist(s));
+
+// Un álbum se agrupa por su artista principal (no por la colaboración de cada pista)
+export const albumKey = (s) => `${artistKey(albumOwner(s))}\u0001${s.album.toLowerCase()}`;
 
 export function allSongs(sort = 'title') {
   const list = [...songs.values()];
@@ -49,7 +89,7 @@ export function albums() {
     const k = albumKey(s);
     let a = map.get(k);
     if (!a) {
-      a = { key: k, name: s.album, artist: s.albumArtist || s.artist, year: s.year, coverId: s.coverId, songs: [], addedAt: s.addedAt };
+      a = { key: k, name: s.album, artist: albumOwner(s), year: s.year, coverId: s.coverId, songs: [], addedAt: s.addedAt };
       map.set(k, a);
     }
     a.songs.push(s);
@@ -70,13 +110,15 @@ export function album(key) { return albums().find(a => a.key === key); }
 export function artists() {
   const map = new Map();
   for (const s of songs.values()) {
-    const name = s.artist;
-    const k = name.toLowerCase();
-    let a = map.get(k);
-    if (!a) { a = { key: k, name, songs: [], coverId: null, albums: new Set() }; map.set(k, a); }
-    a.songs.push(s);
-    a.albums.add(albumKey(s));
-    if (!a.coverId && s.coverId) a.coverId = s.coverId;
+    songArtists(s).forEach((name, i) => {
+      const k = artistKey(name);
+      let a = map.get(k);
+      if (!a) { a = { key: k, name, songs: [], coverId: null, ownCover: false, albums: new Set() }; map.set(k, a); }
+      a.songs.push(s);
+      a.albums.add(albumKey(s));
+      // Foto del artista: mejor la carátula de una canción suya que la de una colaboración
+      if (s.coverId && (!a.coverId || (i === 0 && !a.ownCover))) { a.coverId = s.coverId; a.ownCover = i === 0; }
+    });
   }
   return [...map.values()].sort((a, b) => cmp(a.name, b.name));
 }
@@ -85,7 +127,9 @@ export function artist(key) {
   const a = artists().find(x => x.key === key);
   if (!a) return null;
   a.songs.sort((x, y) => (plays[y.id] || 0) - (plays[x.id] || 0) || cmp(x.album, y.album) || trackOrder(x, y));
-  a.albumList = albums().filter(al => a.albums.has(al.key) || al.artist.toLowerCase() === a.key);
+  const all = albums();
+  a.albumList = all.filter(al => artistKey(al.artist) === a.key);                    // sus álbumes
+  a.appearsOn = all.filter(al => a.albums.has(al.key) && artistKey(al.artist) !== a.key); // colaboraciones
   return a;
 }
 
@@ -98,7 +142,7 @@ export function search(q) {
   if (!n) return { songs: [], albums: [], artists: [], playlists: [] };
   const has = (t) => norm(t).includes(n);
   return {
-    songs: allSongs().filter(s => has(s.title) || has(s.artist) || has(s.album)).slice(0, 50),
+    songs: allSongs().filter(s => has(s.title) || songArtists(s).some(has) || has(s.album)).slice(0, 50),
     albums: albums().filter(a => has(a.name) || has(a.artist)).slice(0, 20),
     artists: artists().filter(a => has(a.name)).slice(0, 20),
     playlists: [...playlists.values()].filter(p => has(p.name)),
